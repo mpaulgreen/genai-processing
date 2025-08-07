@@ -29,6 +29,24 @@ type GenAIProcessor struct {
 	logger       *log.Logger
 }
 
+// NewGenAIProcessorWithDeps creates a new instance of GenAIProcessor with injected dependencies.
+// This constructor is primarily used for testing with mock components.
+func NewGenAIProcessorWithDeps(
+	contextManager interfaces.ContextManager,
+	llmEngine interfaces.LLMEngine,
+	parser interfaces.Parser,
+	safetyValidator interfaces.SafetyValidator,
+) *GenAIProcessor {
+	return &GenAIProcessor{
+		contextManager:  contextManager,
+		llmEngine:       llmEngine,
+		parser:          parser,
+		safetyValidator: safetyValidator,
+		defaultModel:    "claude-3-5-sonnet-20241022",
+		logger:          log.New(log.Writer(), "[GenAIProcessor] ", log.LstdFlags),
+	}
+}
+
 // NewGenAIProcessor creates a new instance of GenAIProcessor with all dependencies
 // wired up. This constructor initializes the complete processing pipeline.
 func NewGenAIProcessor() *GenAIProcessor {
@@ -44,16 +62,12 @@ func NewGenAIProcessor() *GenAIProcessor {
 	// Create safety validator
 	safetyValidator := validator.NewSafetyValidator()
 
-	processor := &GenAIProcessor{
-		contextManager:  contextManager,
-		llmEngine:       createLLMEngine(claudeProvider),
-		parser:          parser,
-		safetyValidator: safetyValidator,
-		defaultModel:    "claude-3-5-sonnet-20241022",
-		logger:          log.New(log.Writer(), "[GenAIProcessor] ", log.LstdFlags),
-	}
-
-	return processor
+	return NewGenAIProcessorWithDeps(
+		contextManager,
+		createLLMEngine(claudeProvider),
+		parser,
+		safetyValidator,
+	)
 }
 
 // ProcessQuery orchestrates the complete processing pipeline:
