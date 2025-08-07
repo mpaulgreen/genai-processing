@@ -1,2 +1,8 @@
 *.env
 configs/secrets.yaml
+
+# Test coverage files
+coverage.out
+coverage.html
+*.cover
+*.cover.out
