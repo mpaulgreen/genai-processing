@@ -102,6 +102,11 @@ func (m *mockLLMEngine) AdaptInput(req *types.InternalRequest) (*types.ModelRequ
 	}, nil
 }
 
+func (m *mockLLMEngine) ValidateConnection() error {
+	// Mock implementation - always succeeds
+	return nil
+}
+
 // mockParser implements interfaces.Parser for testing
 type mockParser struct {
 	queries    map[string]*types.StructuredQuery

@@ -43,6 +43,14 @@ type LLMEngine interface {
 	//   - ModelRequest: The adapted model-specific request
 	//   - error: Any error that occurred during adaptation
 	AdaptInput(req *types.InternalRequest) (*types.ModelRequest, error)
+
+	// ValidateConnection checks if the provider connection is working.
+	// This method validates that the underlying LLM provider can be reached
+	// and is properly configured for making API calls.
+	//
+	// Returns:
+	//   - error: Any error that occurred during connection validation
+	ValidateConnection() error
 }
 
 // LLMProvider defines the interface for individual LLM provider implementations.

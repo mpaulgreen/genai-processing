@@ -231,6 +231,38 @@ func (e *simpleLLMEngine) AdaptInput(req *types.InternalRequest) (*types.ModelRe
 	}, nil
 }
 
+// ValidateConnection checks if the provider connection is working
+func (e *simpleLLMEngine) ValidateConnection() error {
+	// Check if provider supports connection validation
+	if validator, ok := e.provider.(interface{ ValidateConnection() error }); ok {
+		return validator.ValidateConnection()
+	}
+
+	// Fallback: try a simple test request
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	testReq := &types.ModelRequest{
+		Model: "test",
+		Messages: []interface{}{
+			map[string]interface{}{
+				"role":    "user",
+				"content": "test",
+			},
+		},
+		Parameters: map[string]interface{}{
+			"max_tokens": 1,
+		},
+	}
+
+	_, err := e.provider.GenerateResponse(ctx, testReq)
+	if err != nil {
+		return fmt.Errorf("connection validation failed: %w", err)
+	}
+
+	return nil
+}
+
 // getSystemPrompt returns the system prompt for OpenShift audit queries
 func getSystemPrompt() string {
 	return `You are an OpenShift audit query specialist. Convert natural language queries into structured JSON parameters for audit log analysis.
