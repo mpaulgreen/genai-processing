@@ -85,4 +85,12 @@ type LLMProvider interface {
 	// Returns:
 	//   - bool: True if streaming is supported, false otherwise
 	SupportsStreaming() bool
+
+	// ValidateConnection checks if the provider connection is working.
+	// This method validates that the underlying LLM provider can be reached
+	// and is properly configured for making API calls.
+	//
+	// Returns:
+	//   - error: Any error that occurred during connection validation
+	ValidateConnection() error
 }

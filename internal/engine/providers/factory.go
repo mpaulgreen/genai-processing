@@ -3,30 +3,23 @@ package providers
 import (
 	"fmt"
 	"genai-processing/pkg/interfaces"
+	"genai-processing/pkg/types"
 )
-
-// ProviderConfig holds configuration for creating LLM providers
-type ProviderConfig struct {
-	APIKey     string                 `json:"api_key"`
-	Endpoint   string                 `json:"endpoint,omitempty"`
-	ModelName  string                 `json:"model_name,omitempty"`
-	Parameters map[string]interface{} `json:"parameters,omitempty"`
-}
 
 // ProviderFactory is responsible for creating and managing LLM providers
 type ProviderFactory struct {
-	configs map[string]*ProviderConfig
+	configs map[string]*types.ProviderConfig
 }
 
 // NewProviderFactory creates a new ProviderFactory instance
 func NewProviderFactory() *ProviderFactory {
 	return &ProviderFactory{
-		configs: make(map[string]*ProviderConfig),
+		configs: make(map[string]*types.ProviderConfig),
 	}
 }
 
 // RegisterProvider registers a provider configuration for later use
-func (f *ProviderFactory) RegisterProvider(providerType string, config *ProviderConfig) error {
+func (f *ProviderFactory) RegisterProvider(providerType string, config *types.ProviderConfig) error {
 	if providerType == "" {
 		return fmt.Errorf("provider type cannot be empty")
 	}
@@ -80,7 +73,7 @@ func (f *ProviderFactory) GetSupportedProviders() []string {
 }
 
 // GetProviderConfig returns the configuration for a specific provider type
-func (f *ProviderFactory) GetProviderConfig(providerType string) (*ProviderConfig, error) {
+func (f *ProviderFactory) GetProviderConfig(providerType string) (*types.ProviderConfig, error) {
 	if providerType == "" {
 		return nil, fmt.Errorf("provider type cannot be empty")
 	}
@@ -122,7 +115,7 @@ func (f *ProviderFactory) ValidateProvider(providerType string) error {
 }
 
 // CreateProviderWithConfig creates a provider with the given configuration
-func (f *ProviderFactory) CreateProviderWithConfig(providerType string, config *ProviderConfig) (interfaces.LLMProvider, error) {
+func (f *ProviderFactory) CreateProviderWithConfig(providerType string, config *types.ProviderConfig) (interfaces.LLMProvider, error) {
 	if providerType == "" {
 		return nil, fmt.Errorf("provider type cannot be empty")
 	}
@@ -145,10 +138,10 @@ func (f *ProviderFactory) CreateProviderWithConfig(providerType string, config *
 }
 
 // GetDefaultConfig returns a default configuration for a provider type
-func (f *ProviderFactory) GetDefaultConfig(providerType string) *ProviderConfig {
+func (f *ProviderFactory) GetDefaultConfig(providerType string) *types.ProviderConfig {
 	switch providerType {
 	case "claude":
-		return &ProviderConfig{
+		return &types.ProviderConfig{
 			APIKey:    "", // Must be set by user
 			Endpoint:  "https://api.anthropic.com/v1/messages",
 			ModelName: "claude-3-5-sonnet-20241022",
@@ -158,7 +151,7 @@ func (f *ProviderFactory) GetDefaultConfig(providerType string) *ProviderConfig 
 			},
 		}
 	case "openai":
-		return &ProviderConfig{
+		return &types.ProviderConfig{
 			APIKey:    "", // Must be set by user
 			Endpoint:  "https://api.openai.com/v1/chat/completions",
 			ModelName: "gpt-4",

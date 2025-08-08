@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"genai-processing/pkg/types"
 	"testing"
 )
 
@@ -26,13 +27,13 @@ func TestProviderFactory_RegisterProvider(t *testing.T) {
 	tests := []struct {
 		name         string
 		providerType string
-		config       *ProviderConfig
+		config       *types.ProviderConfig
 		wantErr      bool
 	}{
 		{
 			name:         "valid claude provider",
 			providerType: "claude",
-			config: &ProviderConfig{
+			config: &types.ProviderConfig{
 				APIKey:   "test-key",
 				Endpoint: "https://api.anthropic.com/v1/messages",
 			},
@@ -41,7 +42,7 @@ func TestProviderFactory_RegisterProvider(t *testing.T) {
 		{
 			name:         "valid openai provider",
 			providerType: "openai",
-			config: &ProviderConfig{
+			config: &types.ProviderConfig{
 				APIKey:    "test-key",
 				Endpoint:  "https://api.openai.com/v1/chat/completions",
 				ModelName: "gpt-4",
@@ -55,7 +56,7 @@ func TestProviderFactory_RegisterProvider(t *testing.T) {
 		{
 			name:         "empty provider type",
 			providerType: "",
-			config: &ProviderConfig{
+			config: &types.ProviderConfig{
 				APIKey: "test-key",
 			},
 			wantErr: true,
@@ -69,7 +70,7 @@ func TestProviderFactory_RegisterProvider(t *testing.T) {
 		{
 			name:         "empty API key",
 			providerType: "claude",
-			config: &ProviderConfig{
+			config: &types.ProviderConfig{
 				APIKey: "",
 			},
 			wantErr: true,
@@ -102,7 +103,7 @@ func TestProviderFactory_CreateProvider(t *testing.T) {
 	factory := NewProviderFactory()
 
 	// Register a claude provider
-	claudeConfig := &ProviderConfig{
+	claudeConfig := &types.ProviderConfig{
 		APIKey:   "test-key",
 		Endpoint: "https://api.anthropic.com/v1/messages",
 	}
@@ -112,7 +113,7 @@ func TestProviderFactory_CreateProvider(t *testing.T) {
 	}
 
 	// Register an openai provider
-	openaiConfig := &ProviderConfig{
+	openaiConfig := &types.ProviderConfig{
 		APIKey:    "test-key",
 		Endpoint:  "https://api.openai.com/v1/chat/completions",
 		ModelName: "gpt-4",
@@ -214,7 +215,7 @@ func TestProviderFactory_GetSupportedProviders(t *testing.T) {
 	}
 
 	// Register a claude provider
-	claudeConfig := &ProviderConfig{
+	claudeConfig := &types.ProviderConfig{
 		APIKey:   "test-key",
 		Endpoint: "https://api.anthropic.com/v1/messages",
 	}
@@ -234,7 +235,7 @@ func TestProviderFactory_GetSupportedProviders(t *testing.T) {
 	}
 
 	// Register an openai provider
-	openaiConfig := &ProviderConfig{
+	openaiConfig := &types.ProviderConfig{
 		APIKey:    "test-key",
 		Endpoint:  "https://api.openai.com/v1/chat/completions",
 		ModelName: "gpt-4",
@@ -274,7 +275,7 @@ func TestProviderFactory_GetProviderConfig(t *testing.T) {
 	factory := NewProviderFactory()
 
 	// Register a claude provider
-	claudeConfig := &ProviderConfig{
+	claudeConfig := &types.ProviderConfig{
 		APIKey:   "test-key",
 		Endpoint: "https://api.anthropic.com/v1/messages",
 	}
@@ -284,7 +285,7 @@ func TestProviderFactory_GetProviderConfig(t *testing.T) {
 	}
 
 	// Register an openai provider
-	openaiConfig := &ProviderConfig{
+	openaiConfig := &types.ProviderConfig{
 		APIKey:    "test-key",
 		Endpoint:  "https://api.openai.com/v1/chat/completions",
 		ModelName: "gpt-4",
@@ -412,7 +413,7 @@ func TestProviderFactory_ValidateProvider(t *testing.T) {
 
 			// Register provider if needed
 			if tt.register {
-				config := &ProviderConfig{
+				config := &types.ProviderConfig{
 					APIKey:   "test-key",
 					Endpoint: "https://api.anthropic.com/v1/messages",
 				}
@@ -447,13 +448,13 @@ func TestProviderFactory_CreateProviderWithConfig(t *testing.T) {
 	tests := []struct {
 		name         string
 		providerType string
-		config       *ProviderConfig
+		config       *types.ProviderConfig
 		wantErr      bool
 	}{
 		{
 			name:         "valid claude provider",
 			providerType: "claude",
-			config: &ProviderConfig{
+			config: &types.ProviderConfig{
 				APIKey:   "test-key",
 				Endpoint: "https://api.anthropic.com/v1/messages",
 			},
@@ -462,7 +463,7 @@ func TestProviderFactory_CreateProviderWithConfig(t *testing.T) {
 		{
 			name:         "valid openai provider with full config",
 			providerType: "openai",
-			config: &ProviderConfig{
+			config: &types.ProviderConfig{
 				APIKey:    "test-key",
 				Endpoint:  "https://api.openai.com/v1/chat/completions",
 				ModelName: "gpt-4",
@@ -477,7 +478,7 @@ func TestProviderFactory_CreateProviderWithConfig(t *testing.T) {
 		{
 			name:         "unsupported provider type",
 			providerType: "unsupported",
-			config: &ProviderConfig{
+			config: &types.ProviderConfig{
 				APIKey: "test-key",
 			},
 			wantErr: true,
@@ -491,7 +492,7 @@ func TestProviderFactory_CreateProviderWithConfig(t *testing.T) {
 		{
 			name:         "empty API key",
 			providerType: "claude",
-			config: &ProviderConfig{
+			config: &types.ProviderConfig{
 				APIKey: "",
 			},
 			wantErr: true,
@@ -499,7 +500,7 @@ func TestProviderFactory_CreateProviderWithConfig(t *testing.T) {
 		{
 			name:         "empty provider type",
 			providerType: "",
-			config: &ProviderConfig{
+			config: &types.ProviderConfig{
 				APIKey: "test-key",
 			},
 			wantErr: true,
@@ -788,7 +789,7 @@ func TestProviderFactory_BackwardCompatibility(t *testing.T) {
 	factory := NewProviderFactory()
 
 	// Test that Claude support remains intact
-	claudeConfig := &ProviderConfig{
+	claudeConfig := &types.ProviderConfig{
 		APIKey:   "test-key",
 		Endpoint: "https://api.anthropic.com/v1/messages",
 	}
@@ -807,7 +808,7 @@ func TestProviderFactory_BackwardCompatibility(t *testing.T) {
 	}
 
 	// Test that both providers can coexist
-	openaiConfig := &ProviderConfig{
+	openaiConfig := &types.ProviderConfig{
 		APIKey:    "test-key",
 		Endpoint:  "https://api.openai.com/v1/chat/completions",
 		ModelName: "gpt-4",
