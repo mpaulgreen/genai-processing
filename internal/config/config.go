@@ -213,7 +213,7 @@ func (c *ModelConfig) Validate() ValidationResult {
 	}
 
 	// API key is only required for external providers, not for local models
-	if c.Provider != "ollama" && c.Provider != "local" {
+	if c.Provider != "ollama" && c.Provider != "local" && c.Provider != "generic" {
 		if c.APIKey == "" {
 			result.Valid = false
 			result.Errors = append(result.Errors, "api_key is required")

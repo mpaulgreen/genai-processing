@@ -93,8 +93,8 @@ providers:
   # User-provided model - For custom/enterprise models
   user_model:
     provider: "generic"
-    endpoint: "${USER_MODEL_ENDPOINT:-http://localhost:8080}"
-    api_key: "${USER_MODEL_API_KEY:-}"
+    endpoint: "http://localhost:8080"
+    api_key: ""
     model_name: "custom-model"
     max_tokens: 4000
     temperature: 0.1

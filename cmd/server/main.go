@@ -2,13 +2,15 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
-	"time"
 
+	"genai-processing/internal/config"
 	"genai-processing/internal/processor"
 )
 
@@ -17,17 +19,22 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	log.Println("Starting GenAI Audit Query Processor Server")
 
-	// Get port from environment variable or use default
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
+	// Load configuration at startup
+	log.Println("Loading configuration...")
+	appConfig, err := loadConfiguration()
+	if err != nil {
+		log.Fatalf("Failed to load configuration: %v", err)
 	}
+	log.Println("✓ Configuration loaded successfully")
 
-	// Initialize GenAI processor
-	log.Println("Initializing GenAI processor...")
-	genaiProcessor := processor.NewGenAIProcessor()
-	if genaiProcessor == nil {
-		log.Fatal("Failed to initialize GenAI processor")
+	// Log configuration status during startup
+	logConfigurationStatus(appConfig)
+
+	// Initialize GenAI processor with configuration
+	log.Println("Initializing GenAI processor with configuration...")
+	genaiProcessor, err := initializeProcessor(appConfig)
+	if err != nil {
+		log.Fatalf("Failed to initialize GenAI processor: %v", err)
 	}
 	log.Println("✓ GenAI processor initialized successfully")
 
@@ -41,25 +48,28 @@ func main() {
 	handler := corsMiddleware(loggingMiddleware(mux))
 	log.Println("✓ Middleware configured")
 
-	// Configure server
+	// Configure server using loaded configuration
 	server := &http.Server{
-		Addr:         ":" + port,
+		Addr:         appConfig.Server.Host + ":" + appConfig.Server.Port,
 		Handler:      handler,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		ReadTimeout:  appConfig.Server.ReadTimeout,
+		WriteTimeout: appConfig.Server.WriteTimeout,
+		IdleTimeout:  appConfig.Server.IdleTimeout,
 	}
 
 	// Start server in a goroutine
 	go func() {
-		log.Printf("Server starting on port %s", port)
+		log.Printf("Server starting on %s:%s", appConfig.Server.Host, appConfig.Server.Port)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Server failed to start: %v", err)
 		}
 	}()
 
 	// Log startup completion
-	log.Printf("✓ Server started successfully on port %s", port)
+	log.Printf("✓ Server started successfully on %s:%s", appConfig.Server.Host, appConfig.Server.Port)
+	log.Printf("✓ Server timeouts - Read: %v, Write: %v, Idle: %v",
+		appConfig.Server.ReadTimeout, appConfig.Server.WriteTimeout, appConfig.Server.IdleTimeout)
+	log.Printf("✓ Default LLM provider: %s", appConfig.Models.DefaultProvider)
 	log.Println("✓ POST /query - Process natural language audit queries")
 	log.Println("✓ GET  /health - Health check endpoint")
 	log.Println("Press Ctrl+C to shutdown gracefully")
@@ -71,8 +81,8 @@ func main() {
 
 	log.Println("Shutting down server...")
 
-	// Create a deadline for server shutdown
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// Create a deadline for server shutdown using configuration
+	ctx, cancel := context.WithTimeout(context.Background(), appConfig.Server.ShutdownTimeout)
 	defer cancel()
 
 	// Attempt graceful shutdown
@@ -81,4 +91,92 @@ func main() {
 	}
 
 	log.Println("Server exited gracefully")
+}
+
+// loadConfiguration loads the application configuration using config.LoadConfig()
+func loadConfiguration() (*config.AppConfig, error) {
+	// Determine config directory
+	configDir := os.Getenv("CONFIG_DIR")
+	if configDir == "" {
+		// Default to configs directory relative to executable
+		execPath, err := os.Executable()
+		if err != nil {
+			// Fallback to current directory
+			configDir = "configs"
+		} else {
+			configDir = filepath.Join(filepath.Dir(execPath), "configs")
+		}
+	}
+
+	log.Printf("Loading configuration from: %s", configDir)
+
+	// Create configuration loader
+	loader := config.NewLoader(configDir)
+
+	// Load configuration
+	appConfig, err := loader.LoadConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load configuration: %w", err)
+	}
+
+	// Add configuration validation at startup
+	if result := appConfig.Validate(); !result.Valid {
+		return nil, fmt.Errorf("configuration validation failed: %v", result.Errors)
+	}
+
+	return appConfig, nil
+}
+
+// logConfigurationStatus logs the configuration status during startup
+func logConfigurationStatus(appConfig *config.AppConfig) {
+	log.Println("=== Configuration Status ===")
+
+	// Server configuration
+	log.Printf("Server Configuration:")
+	log.Printf("  Host: %s", appConfig.Server.Host)
+	log.Printf("  Port: %s", appConfig.Server.Port)
+	log.Printf("  Read Timeout: %v", appConfig.Server.ReadTimeout)
+	log.Printf("  Write Timeout: %v", appConfig.Server.WriteTimeout)
+	log.Printf("  Idle Timeout: %v", appConfig.Server.IdleTimeout)
+	log.Printf("  Shutdown Timeout: %v", appConfig.Server.ShutdownTimeout)
+	log.Printf("  Max Request Size: %d bytes", appConfig.Server.MaxRequestSize)
+
+	// Models configuration
+	log.Printf("Models Configuration:")
+	log.Printf("  Default Provider: %s", appConfig.Models.DefaultProvider)
+	log.Printf("  Available Providers: %d", len(appConfig.Models.Providers))
+	for name, provider := range appConfig.Models.Providers {
+		log.Printf("    %s: %s (%s)", name, provider.ModelName, provider.Provider)
+	}
+
+	// Prompts configuration
+	log.Printf("Prompts Configuration:")
+	log.Printf("  System Prompts: %d", len(appConfig.Prompts.SystemPrompts))
+	log.Printf("  Examples: %d", len(appConfig.Prompts.Examples))
+	log.Printf("  Max Input Length: %d", appConfig.Prompts.Validation.MaxInputLength)
+	log.Printf("  Max Output Length: %d", appConfig.Prompts.Validation.MaxOutputLength)
+	log.Printf("  Required Fields: %v", appConfig.Prompts.Validation.RequiredFields)
+
+	log.Println("=== Configuration Status Complete ===")
+}
+
+// initializeProcessor initializes the GenAI processor with configuration
+func initializeProcessor(appConfig *config.AppConfig) (*processor.GenAIProcessor, error) {
+	// For now, use the existing NewGenAIProcessor() function
+	// In the future, this should be updated to accept configuration parameters
+	genaiProcessor := processor.NewGenAIProcessor()
+	if genaiProcessor == nil {
+		return nil, fmt.Errorf("failed to create GenAI processor")
+	}
+
+	// TODO: Update processor initialization to use configuration
+	// This would involve:
+	// 1. Passing model configuration to LLM providers
+	// 2. Loading prompts configuration for the LLM engine
+	// 3. Configuring validation rules
+	// 4. Setting up model-specific adapters and parsers
+
+	log.Printf("Processor initialized with default model: %s", appConfig.Models.DefaultProvider)
+
+	return genaiProcessor, nil
 }
