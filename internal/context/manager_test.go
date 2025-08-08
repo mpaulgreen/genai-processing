@@ -51,6 +51,20 @@ func TestUpdateContext_NewSession(t *testing.T) {
 	if context.LastActivity.IsZero() {
 		t.Error("Expected LastActivity to be set")
 	}
+
+	// Verify conversation history was added
+	if len(context.ConversationHistory) != 1 {
+		t.Errorf("Expected 1 conversation entry, got %d", len(context.ConversationHistory))
+	}
+
+	entry := context.ConversationHistory[0]
+	if entry.Query != query {
+		t.Errorf("Expected query %s, got %s", query, entry.Query)
+	}
+
+	if entry.Response != response {
+		t.Errorf("Expected response %v, got %v", response, entry.Response)
+	}
 }
 
 func TestUpdateContext_ExistingSession(t *testing.T) {
@@ -108,21 +122,395 @@ func TestUpdateContext_ExistingSession(t *testing.T) {
 	if !updatedContext.CreatedAt.Equal(initialContext.CreatedAt) {
 		t.Error("Expected CreatedAt to remain unchanged")
 	}
+
+	// Verify conversation history was updated
+	if len(updatedContext.ConversationHistory) != 2 {
+		t.Errorf("Expected 2 conversation entries, got %d", len(updatedContext.ConversationHistory))
+	}
 }
 
-func TestResolvePronouns_StubImplementation(t *testing.T) {
+func TestResolvePronouns_UserPronouns(t *testing.T) {
 	cm := NewContextManager()
-	sessionID := "test-session-3"
-	query := "When did he do it?"
+	sessionID := "test-session-pronouns"
 
-	// Test that ResolvePronouns returns input unchanged (stub implementation)
-	resolved, err := cm.ResolvePronouns(query, sessionID)
+	// First query to establish context
+	query1 := "Who deleted the customer CRD yesterday?"
+	response1 := &types.StructuredQuery{
+		LogSource: "kube-apiserver",
+		Verb:      *types.NewStringOrArray("delete"),
+		Resource:  *types.NewStringOrArray("customresourcedefinitions"),
+		User:      *types.NewStringOrArray("john.doe"),
+		Timeframe: "yesterday",
+	}
+
+	err := cm.UpdateContext(sessionID, query1, response1)
 	if err != nil {
-		t.Errorf("ResolvePronouns() failed: %v", err)
+		t.Fatalf("UpdateContext() failed: %v", err)
+	}
+
+	// Test pronoun resolution
+	testCases := []struct {
+		input    string
+		expected string
+	}{
+		{"When did he do it?", "When did john.doe do customresourcedefinitions?"},
+		{"What did she delete?", "What did john.doe delete?"},
+		{"Show me actions by that user", "Show me actions by john.doe"},
+		{"What did the user do?", "What did john.doe do?"},
+		{"Show me what this user did", "Show me what john.doe did"},
+	}
+
+	for _, tc := range testCases {
+		resolved, err := cm.ResolvePronouns(tc.input, sessionID)
+		if err != nil {
+			t.Errorf("ResolvePronouns() failed for '%s': %v", tc.input, err)
+			continue
+		}
+
+		if resolved != tc.expected {
+			t.Errorf("For input '%s', expected '%s', got '%s'", tc.input, tc.expected, resolved)
+		}
+	}
+}
+
+func TestResolvePronouns_ResourceReferences(t *testing.T) {
+	cm := NewContextManager()
+	sessionID := "test-session-resources"
+
+	// First query to establish context
+	query1 := "Who deleted the customer CRD yesterday?"
+	response1 := &types.StructuredQuery{
+		LogSource:           "kube-apiserver",
+		Verb:                *types.NewStringOrArray("delete"),
+		Resource:            *types.NewStringOrArray("customresourcedefinitions"),
+		ResourceNamePattern: "customer",
+		User:                *types.NewStringOrArray("john.doe"),
+	}
+
+	err := cm.UpdateContext(sessionID, query1, response1)
+	if err != nil {
+		t.Fatalf("UpdateContext() failed: %v", err)
+	}
+
+	// Test resource reference resolution
+	testCases := []struct {
+		input    string
+		expected string
+	}{
+		{"When was it deleted?", "When was customresourcedefinitions deleted?"},
+		{"Show me that resource", "Show me customresourcedefinitions"},
+		{"What happened to the resource?", "What happened to customresourcedefinitions?"},
+		{"Show me that CRD", "Show me customer"},
+		{"What happened to the CRD?", "What happened to customer?"},
+	}
+
+	for _, tc := range testCases {
+		resolved, err := cm.ResolvePronouns(tc.input, sessionID)
+		if err != nil {
+			t.Errorf("ResolvePronouns() failed for '%s': %v", tc.input, err)
+			continue
+		}
+
+		if resolved != tc.expected {
+			t.Errorf("For input '%s', expected '%s', got '%s'", tc.input, tc.expected, resolved)
+		}
+	}
+}
+
+func TestResolvePronouns_TimeReferences(t *testing.T) {
+	cm := NewContextManager()
+	sessionID := "test-session-time"
+
+	// First query to establish context
+	query1 := "Who deleted the customer CRD yesterday?"
+	response1 := &types.StructuredQuery{
+		LogSource: "kube-apiserver",
+		Verb:      *types.NewStringOrArray("delete"),
+		Resource:  *types.NewStringOrArray("customresourcedefinitions"),
+		User:      *types.NewStringOrArray("john.doe"),
+		Timeframe: "yesterday",
+	}
+
+	err := cm.UpdateContext(sessionID, query1, response1)
+	if err != nil {
+		t.Fatalf("UpdateContext() failed: %v", err)
+	}
+
+	// Test time reference resolution
+	testCases := []struct {
+		input    string
+		expected string
+	}{
+		{"What happened around that time?", "What happened yesterday?"},
+		{"Show me events at that time", "Show me events yesterday"},
+		{"What did he do then?", "What did john.doe do yesterday?"},
+	}
+
+	for _, tc := range testCases {
+		resolved, err := cm.ResolvePronouns(tc.input, sessionID)
+		if err != nil {
+			t.Errorf("ResolvePronouns() failed for '%s': %v", tc.input, err)
+			continue
+		}
+
+		if resolved != tc.expected {
+			t.Errorf("For input '%s', expected '%s', got '%s'", tc.input, tc.expected, resolved)
+		}
+	}
+}
+
+func TestResolvePronouns_ActionReferences(t *testing.T) {
+	cm := NewContextManager()
+	sessionID := "test-session-actions"
+
+	// First query to establish context
+	query1 := "Who deleted the customer CRD yesterday?"
+	response1 := &types.StructuredQuery{
+		LogSource: "kube-apiserver",
+		Verb:      *types.NewStringOrArray("delete"),
+		Resource:  *types.NewStringOrArray("customresourcedefinitions"),
+		User:      *types.NewStringOrArray("john.doe"),
+	}
+
+	err := cm.UpdateContext(sessionID, query1, response1)
+	if err != nil {
+		t.Fatalf("UpdateContext() failed: %v", err)
+	}
+
+	// Test action reference resolution
+	testCases := []struct {
+		input    string
+		expected string
+	}{
+		{"When did he do that action?", "When did john.doe do delete?"},
+		{"Show me the action details", "Show me delete details"},
+		{"What action did he perform?", "What action did john.doe perform?"},
+	}
+
+	for _, tc := range testCases {
+		resolved, err := cm.ResolvePronouns(tc.input, sessionID)
+		if err != nil {
+			t.Errorf("ResolvePronouns() failed for '%s': %v", tc.input, err)
+			continue
+		}
+
+		if resolved != tc.expected {
+			t.Errorf("For input '%s', expected '%s', got '%s'", tc.input, tc.expected, resolved)
+		}
+	}
+}
+
+func TestResolvePronouns_NoContext(t *testing.T) {
+	cm := NewContextManager()
+	sessionID := "test-session-no-context"
+
+	// Test pronoun resolution without any context
+	query := "When did he do it?"
+	resolved, err := cm.ResolvePronouns(query, sessionID)
+	if err == nil {
+		t.Error("Expected error for non-existent session")
 	}
 
 	if resolved != query {
-		t.Errorf("Expected resolved query to be unchanged, got %s", resolved)
+		t.Errorf("Expected query to remain unchanged, got %s", resolved)
+	}
+}
+
+func TestResolvePronouns_ComplexConversation(t *testing.T) {
+	cm := NewContextManager()
+	sessionID := "test-session-complex"
+
+	// Simulate a complex conversation
+	conversation := []struct {
+		query    string
+		response *types.StructuredQuery
+	}{
+		{
+			"Who deleted the customer CRD yesterday?",
+			&types.StructuredQuery{
+				LogSource:           "kube-apiserver",
+				Verb:                *types.NewStringOrArray("delete"),
+				Resource:            *types.NewStringOrArray("customresourcedefinitions"),
+				ResourceNamePattern: "customer",
+				User:                *types.NewStringOrArray("john.doe"),
+				Timeframe:           "yesterday",
+			},
+		},
+		{
+			"When did he do it?",
+			&types.StructuredQuery{
+				LogSource: "kube-apiserver",
+				User:      *types.NewStringOrArray("john.doe"),
+				Timeframe: "yesterday",
+			},
+		},
+		{
+			"What other resources did he modify?",
+			&types.StructuredQuery{
+				LogSource: "kube-apiserver",
+				User:      *types.NewStringOrArray("john.doe"),
+				Verb:      *types.NewStringOrArray([]string{"update", "patch"}),
+			},
+		},
+	}
+
+	// Update context with conversation
+	for i, conv := range conversation {
+		err := cm.UpdateContext(sessionID, conv.query, conv.response)
+		if err != nil {
+			t.Fatalf("UpdateContext() failed for conversation %d: %v", i, err)
+		}
+	}
+
+	// Test pronoun resolution with complex context
+	testCases := []struct {
+		input    string
+		expected string
+	}{
+		{"Show me what he did to that CRD", "Show me what john.doe did to customer"},
+		{"When did he modify it?", "When did john.doe modify customresourcedefinitions?"},
+		{"What actions did he perform around that time?", "What actions did john.doe perform yesterday?"},
+	}
+
+	for _, tc := range testCases {
+		resolved, err := cm.ResolvePronouns(tc.input, sessionID)
+		if err != nil {
+			t.Errorf("ResolvePronouns() failed for '%s': %v", tc.input, err)
+			continue
+		}
+
+		if resolved != tc.expected {
+			t.Errorf("For input '%s', expected '%s', got '%s'", tc.input, tc.expected, resolved)
+		}
+	}
+
+	// Verify conversation history
+	context, err := cm.GetContext(sessionID)
+	if err != nil {
+		t.Fatalf("GetContext() failed: %v", err)
+	}
+
+	if len(context.ConversationHistory) != len(conversation) {
+		t.Errorf("Expected %d conversation entries, got %d", len(conversation), len(context.ConversationHistory))
+	}
+
+	// Verify resolved references
+	if len(context.ResolvedReferences) == 0 {
+		t.Error("Expected resolved references to be populated")
+	}
+}
+
+func TestContextEnrichment(t *testing.T) {
+	cm := NewContextManager()
+	sessionID := "test-session-enrichment"
+
+	query := "Who deleted the customer CRD yesterday?"
+	response := &types.StructuredQuery{
+		LogSource:           "kube-apiserver",
+		Verb:                *types.NewStringOrArray("delete"),
+		Resource:            *types.NewStringOrArray("customresourcedefinitions"),
+		ResourceNamePattern: "customer",
+		User:                *types.NewStringOrArray("john.doe"),
+		Timeframe:           "yesterday",
+		Limit:               20,
+	}
+
+	err := cm.UpdateContext(sessionID, query, response)
+	if err != nil {
+		t.Fatalf("UpdateContext() failed: %v", err)
+	}
+
+	// Verify context enrichment
+	context, err := cm.GetContext(sessionID)
+	if err != nil {
+		t.Fatalf("GetContext() failed: %v", err)
+	}
+
+	// Check query patterns
+	patterns, exists := context.ContextEnrichment["query_patterns"]
+	if !exists {
+		t.Error("Expected query_patterns in context enrichment")
+	}
+
+	patternsMap, ok := patterns.(map[string]interface{})
+	if !ok {
+		t.Error("Expected query_patterns to be a map")
+	}
+
+	if patternsMap["question_type"] != "who" {
+		t.Errorf("Expected question_type 'who', got %v", patternsMap["question_type"])
+	}
+
+	if patternsMap["action_type"] != "deleted" {
+		t.Errorf("Expected action_type 'deleted', got %v", patternsMap["action_type"])
+	}
+
+	// Check response summary
+	summary, exists := context.ContextEnrichment["last_response_summary"]
+	if !exists {
+		t.Error("Expected last_response_summary in context enrichment")
+	}
+
+	summaryMap, ok := summary.(map[string]interface{})
+	if !ok {
+		t.Error("Expected last_response_summary to be a map")
+	}
+
+	if summaryMap["log_source"] != "kube-apiserver" {
+		t.Errorf("Expected log_source 'kube-apiserver', got %v", summaryMap["log_source"])
+	}
+
+	// Check conversation flow
+	flow, exists := context.ContextEnrichment["conversation_flow"]
+	if !exists {
+		t.Error("Expected conversation_flow in context enrichment")
+	}
+
+	flowMap, ok := flow.(map[string]interface{})
+	if !ok {
+		t.Error("Expected conversation_flow to be a map")
+	}
+
+	if flowMap["total_interactions"] != 1 {
+		t.Errorf("Expected total_interactions 1, got %v", flowMap["total_interactions"])
+	}
+
+	if !flowMap["user_focus"].(bool) {
+		t.Error("Expected user_focus to be true")
+	}
+}
+
+func TestSessionExpiration(t *testing.T) {
+	cm := NewContextManager()
+	contextManager := cm.(*ContextManager) // Cast to concrete type for helper methods
+
+	sessionID := "test-session-expiration"
+	query := "Who deleted the customer CRD yesterday?"
+	response := &types.StructuredQuery{
+		LogSource: "kube-apiserver",
+		Verb:      *types.NewStringOrArray("delete"),
+	}
+
+	// Create session
+	err := cm.UpdateContext(sessionID, query, response)
+	if err != nil {
+		t.Fatalf("UpdateContext() failed: %v", err)
+	}
+
+	// Get context and verify it's not expired
+	context, err := cm.GetContext(sessionID)
+	if err != nil {
+		t.Fatalf("GetContext() failed: %v", err)
+	}
+
+	if context.IsExpired() {
+		t.Error("Expected session to not be expired immediately after creation")
+	}
+
+	// Verify session count
+	count := contextManager.GetSessionCount()
+	if count != 1 {
+		t.Errorf("Expected 1 session, got %d", count)
 	}
 }
 
@@ -153,6 +541,11 @@ func TestGetContext_ExistingSession(t *testing.T) {
 
 	if context.SessionID != sessionID {
 		t.Errorf("Expected SessionID %s, got %s", sessionID, context.SessionID)
+	}
+
+	// Verify conversation history
+	if len(context.ConversationHistory) != 1 {
+		t.Errorf("Expected 1 conversation entry, got %d", len(context.ConversationHistory))
 	}
 }
 
@@ -288,6 +681,13 @@ func TestContextManager_ThreadSafety(t *testing.T) {
 				t.Errorf("GetContext() failed in goroutine %d: %v", id, err)
 			}
 
+			// Test pronoun resolution concurrently
+			_, err = cm.ResolvePronouns("When did he do it?", sessionID)
+			if err != nil {
+				// This is expected to fail since there's no user context
+				// but it shouldn't cause a panic
+			}
+
 			done <- true
 		}(i)
 	}
@@ -301,5 +701,81 @@ func TestContextManager_ThreadSafety(t *testing.T) {
 	count := contextManager.GetSessionCount()
 	if count != numGoroutines {
 		t.Errorf("Expected %d sessions, got %d", numGoroutines, count)
+	}
+}
+
+func TestResolvedReferences(t *testing.T) {
+	cm := NewContextManager()
+	sessionID := "test-session-references"
+
+	// Create a session with various references
+	query := "Who deleted the customer CRD yesterday?"
+	response := &types.StructuredQuery{
+		LogSource:           "kube-apiserver",
+		Verb:                *types.NewStringOrArray("delete"),
+		Resource:            *types.NewStringOrArray("customresourcedefinitions"),
+		ResourceNamePattern: "customer",
+		User:                *types.NewStringOrArray("john.doe"),
+		Timeframe:           "yesterday",
+		Namespace:           *types.NewStringOrArray("production"),
+	}
+
+	err := cm.UpdateContext(sessionID, query, response)
+	if err != nil {
+		t.Fatalf("UpdateContext() failed: %v", err)
+	}
+
+	// Verify resolved references
+	context, err := cm.GetContext(sessionID)
+	if err != nil {
+		t.Fatalf("GetContext() failed: %v", err)
+	}
+
+	// Check user reference
+	userRef, exists := context.GetResolvedReference("last_user")
+	if !exists {
+		t.Error("Expected last_user reference to exist")
+	}
+	if userRef.Value != "john.doe" {
+		t.Errorf("Expected last_user 'john.doe', got %s", userRef.Value)
+	}
+	if userRef.Type != "user" {
+		t.Errorf("Expected last_user type 'user', got %s", userRef.Type)
+	}
+
+	// Check resource reference
+	resourceRef, exists := context.GetResolvedReference("last_resource")
+	if !exists {
+		t.Error("Expected last_resource reference to exist")
+	}
+	if resourceRef.Value != "customresourcedefinitions" {
+		t.Errorf("Expected last_resource 'customresourcedefinitions', got %s", resourceRef.Value)
+	}
+
+	// Check resource name reference
+	resourceNameRef, exists := context.GetResolvedReference("last_resource_name")
+	if !exists {
+		t.Error("Expected last_resource_name reference to exist")
+	}
+	if resourceNameRef.Value != "customer" {
+		t.Errorf("Expected last_resource_name 'customer', got %s", resourceNameRef.Value)
+	}
+
+	// Check timeframe reference
+	timeRef, exists := context.GetResolvedReference("last_timeframe")
+	if !exists {
+		t.Error("Expected last_timeframe reference to exist")
+	}
+	if timeRef.Value != "yesterday" {
+		t.Errorf("Expected last_timeframe 'yesterday', got %s", timeRef.Value)
+	}
+
+	// Check action reference
+	actionRef, exists := context.GetResolvedReference("last_action")
+	if !exists {
+		t.Error("Expected last_action reference to exist")
+	}
+	if actionRef.Value != "delete" {
+		t.Errorf("Expected last_action 'delete', got %s", actionRef.Value)
 	}
 }

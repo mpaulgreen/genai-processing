@@ -2,6 +2,8 @@ package context
 
 import (
 	"fmt"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -10,20 +12,37 @@ import (
 )
 
 // ContextManager implements the ContextManager interface for managing conversation context and state.
-// This implementation provides in-memory storage for conversation sessions and basic context management.
+// This implementation provides in-memory storage for conversation sessions and comprehensive context management.
 type ContextManager struct {
 	// sessions stores conversation contexts indexed by session ID
 	sessions map[string]*types.ConversationContext
 
 	// mutex for thread-safe access to sessions map
 	mu sync.RWMutex
+
+	// cleanupInterval is the interval for running session cleanup
+	cleanupInterval time.Duration
+
+	// sessionTimeout is the default timeout for sessions
+	sessionTimeout time.Duration
+
+	// stopCleanup is a channel to stop the cleanup goroutine
+	stopCleanup chan bool
 }
 
 // NewContextManager creates a new instance of ContextManager with initialized in-memory storage.
 func NewContextManager() interfaces.ContextManager {
-	return &ContextManager{
-		sessions: make(map[string]*types.ConversationContext),
+	cm := &ContextManager{
+		sessions:        make(map[string]*types.ConversationContext),
+		cleanupInterval: 5 * time.Minute, // Run cleanup every 5 minutes
+		sessionTimeout:  24 * time.Hour,  // Default 24-hour session timeout
+		stopCleanup:     make(chan bool),
 	}
+
+	// Start cleanup goroutine
+	go cm.runCleanup()
+
+	return cm
 }
 
 // UpdateContext updates the conversation context with new query and response data.
@@ -45,21 +64,25 @@ func (cm *ContextManager) UpdateContext(sessionID string, query string, response
 	context, exists := cm.sessions[sessionID]
 	if !exists {
 		// Create new session context if it doesn't exist
-		context = &types.ConversationContext{
-			SessionID:    sessionID,
-			UserID:       "", // TODO: Extract user ID from session or request
-			CreatedAt:    time.Now(),
-			LastActivity: time.Now(),
-		}
+		context = types.NewConversationContext(sessionID, "") // TODO: Extract user ID from session or request
 		cm.sessions[sessionID] = context
 	} else {
-		// Update last activity for existing session
+		// Update last activity and extend expiration for existing session
 		context.LastActivity = time.Now()
+		context.ExtendExpiration(cm.sessionTimeout)
 	}
 
-	// TODO: Store query and response in conversation history
-	// TODO: Implement conversation history tracking
-	// TODO: Store resolved references for pronoun resolution
+	// Extract and store resolved references from the response
+	resolvedRefs := cm.extractReferencesFromResponse(response)
+
+	// Add conversation entry to history
+	context.AddConversationEntry(query, response, resolvedRefs)
+
+	// Update resolved references for future pronoun resolution
+	cm.updateResolvedReferences(context, response, resolvedRefs)
+
+	// Enrich context with additional information
+	cm.enrichContext(context, query, response)
 
 	return nil
 }
@@ -76,13 +99,31 @@ func (cm *ContextManager) UpdateContext(sessionID string, query string, response
 //   - string: The query with resolved pronouns and references
 //   - error: Any error that occurred during pronoun resolution
 func (cm *ContextManager) ResolvePronouns(query string, sessionID string) (string, error) {
-	// TODO: Implement pronoun resolution logic
-	// TODO: Access conversation history for context
-	// TODO: Resolve references like "he", "she", "that user", "around that time"
-	// TODO: Return resolved query with substituted references
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
 
-	// For now, return the input unchanged as a stub implementation
-	return query, nil
+	// Get session context
+	context, exists := cm.sessions[sessionID]
+	if !exists {
+		return query, fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	// Resolve different types of pronouns and references
+	resolvedQuery := query
+
+	// Resolve user pronouns (he, she, that user, etc.)
+	resolvedQuery = cm.resolveUserPronouns(resolvedQuery, context)
+
+	// Resolve resource references (it, that resource, etc.)
+	resolvedQuery = cm.resolveResourceReferences(resolvedQuery, context)
+
+	// Resolve time references (around that time, then, etc.)
+	resolvedQuery = cm.resolveTimeReferences(resolvedQuery, context)
+
+	// Resolve action references (that action, etc.)
+	resolvedQuery = cm.resolveActionReferences(resolvedQuery, context)
+
+	return resolvedQuery, nil
 }
 
 // GetContext retrieves the current conversation context for a session.
@@ -121,4 +162,327 @@ func (cm *ContextManager) ClearAllSessions() {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	cm.sessions = make(map[string]*types.ConversationContext)
+}
+
+// Close stops the cleanup goroutine and performs final cleanup.
+func (cm *ContextManager) Close() error {
+	close(cm.stopCleanup)
+	return nil
+}
+
+// extractReferencesFromResponse extracts references from a structured query response.
+func (cm *ContextManager) extractReferencesFromResponse(response *types.StructuredQuery) map[string]string {
+	refs := make(map[string]string)
+
+	// Extract user references
+	if !response.User.IsEmpty() {
+		if response.User.IsString() {
+			refs["last_user"] = response.User.GetString()
+		} else if response.User.IsArray() && len(response.User.GetArray()) > 0 {
+			refs["last_user"] = response.User.GetArray()[0]
+		}
+	}
+
+	// Extract resource references
+	if !response.Resource.IsEmpty() {
+		if response.Resource.IsString() {
+			refs["last_resource"] = response.Resource.GetString()
+		} else if response.Resource.IsArray() && len(response.Resource.GetArray()) > 0 {
+			refs["last_resource"] = response.Resource.GetArray()[0]
+		}
+	}
+
+	// Extract namespace references
+	if !response.Namespace.IsEmpty() {
+		if response.Namespace.IsString() {
+			refs["last_namespace"] = response.Namespace.GetString()
+		} else if response.Namespace.IsArray() && len(response.Namespace.GetArray()) > 0 {
+			refs["last_namespace"] = response.Namespace.GetArray()[0]
+		}
+	}
+
+	// Extract verb references
+	if !response.Verb.IsEmpty() {
+		if response.Verb.IsString() {
+			refs["last_action"] = response.Verb.GetString()
+		} else if response.Verb.IsArray() && len(response.Verb.GetArray()) > 0 {
+			refs["last_action"] = response.Verb.GetArray()[0]
+		}
+	}
+
+	// Extract timeframe references
+	if response.Timeframe != "" {
+		refs["last_timeframe"] = response.Timeframe
+	}
+
+	// Extract resource name pattern
+	if response.ResourceNamePattern != "" {
+		refs["last_resource_name"] = response.ResourceNamePattern
+	}
+
+	return refs
+}
+
+// updateResolvedReferences updates the resolved references in the context.
+func (cm *ContextManager) updateResolvedReferences(context *types.ConversationContext, response *types.StructuredQuery, refs map[string]string) {
+	for key, value := range refs {
+		if value != "" {
+			// Determine reference type based on key
+			refType := "unknown"
+			switch {
+			case strings.HasPrefix(key, "last_user"):
+				refType = "user"
+			case strings.HasPrefix(key, "last_resource"):
+				refType = "resource"
+			case strings.HasPrefix(key, "last_namespace"):
+				refType = "namespace"
+			case strings.HasPrefix(key, "last_action"):
+				refType = "action"
+			case strings.HasPrefix(key, "last_timeframe"):
+				refType = "time"
+			case strings.HasPrefix(key, "last_resource_name"):
+				refType = "resource_name"
+			}
+
+			context.UpdateResolvedReference(key, refType, value, 0.9) // High confidence for extracted references
+		}
+	}
+}
+
+// enrichContext adds additional context information for better LLM understanding.
+func (cm *ContextManager) enrichContext(context *types.ConversationContext, query string, response *types.StructuredQuery) {
+	// Add query patterns for context
+	context.ContextEnrichment["query_patterns"] = cm.extractQueryPatterns(query)
+
+	// Add response summary
+	context.ContextEnrichment["last_response_summary"] = cm.createResponseSummary(response)
+
+	// Add conversation flow information
+	context.ContextEnrichment["conversation_flow"] = cm.analyzeConversationFlow(context)
+}
+
+// resolveUserPronouns resolves user-related pronouns in the query.
+func (cm *ContextManager) resolveUserPronouns(query string, context *types.ConversationContext) string {
+	resolved := query
+
+	// Common user pronouns and patterns
+	userPatterns := map[string]string{
+		`\bhe\b`:            "last_user",
+		`\bshe\b`:           "last_user",
+		`\bthat user\b`:     "last_user",
+		`\bthe user\b`:      "last_user",
+		`\bthis user\b`:     "last_user",
+		`\bthe same user\b`: "last_user",
+	}
+
+	for pattern, refKey := range userPatterns {
+		if ref, exists := context.GetResolvedReference(refKey); exists && ref.Value != "" {
+			re := regexp.MustCompile(pattern)
+			resolved = re.ReplaceAllString(resolved, ref.Value)
+		}
+	}
+
+	return resolved
+}
+
+// resolveResourceReferences resolves resource-related references in the query.
+func (cm *ContextManager) resolveResourceReferences(query string, context *types.ConversationContext) string {
+	resolved := query
+
+	// Common resource pronouns and patterns
+	resourcePatterns := map[string]string{
+		`\bit\b`:                "last_resource",
+		`\bthat resource\b`:     "last_resource",
+		`\bthe resource\b`:      "last_resource",
+		`\bthis resource\b`:     "last_resource",
+		`\bthe same resource\b`: "last_resource",
+		`\bthat CRD\b`:          "last_resource_name",
+		`\bthe CRD\b`:           "last_resource_name",
+		`\bthis CRD\b`:          "last_resource_name",
+	}
+
+	for pattern, refKey := range resourcePatterns {
+		if ref, exists := context.GetResolvedReference(refKey); exists && ref.Value != "" {
+			re := regexp.MustCompile(pattern)
+			resolved = re.ReplaceAllString(resolved, ref.Value)
+		}
+	}
+
+	return resolved
+}
+
+// resolveTimeReferences resolves time-related references in the query.
+func (cm *ContextManager) resolveTimeReferences(query string, context *types.ConversationContext) string {
+	resolved := query
+
+	// Common time references
+	timePatterns := map[string]string{
+		`\baround that time\b`: "last_timeframe",
+		`\bat that time\b`:     "last_timeframe",
+		`\bthen\b`:             "last_timeframe",
+	}
+
+	for pattern, refKey := range timePatterns {
+		if ref, exists := context.GetResolvedReference(refKey); exists && ref.Value != "" {
+			re := regexp.MustCompile(pattern)
+			resolved = re.ReplaceAllString(resolved, ref.Value)
+		}
+	}
+
+	return resolved
+}
+
+// resolveActionReferences resolves action-related references in the query.
+func (cm *ContextManager) resolveActionReferences(query string, context *types.ConversationContext) string {
+	resolved := query
+
+	// Common action references
+	actionPatterns := map[string]string{
+		`\bthat action\b`: "last_action",
+		`\bthe action\b`:  "last_action",
+		`\bthis action\b`: "last_action",
+	}
+
+	for pattern, refKey := range actionPatterns {
+		if ref, exists := context.GetResolvedReference(refKey); exists && ref.Value != "" {
+			re := regexp.MustCompile(pattern)
+			resolved = re.ReplaceAllString(resolved, ref.Value)
+		}
+	}
+
+	return resolved
+}
+
+// extractQueryPatterns extracts patterns from the query for context enrichment.
+func (cm *ContextManager) extractQueryPatterns(query string) map[string]interface{} {
+	patterns := make(map[string]interface{})
+
+	// Extract question words
+	questionWords := []string{"who", "what", "when", "where", "why", "how"}
+	for _, word := range questionWords {
+		if strings.Contains(strings.ToLower(query), word) {
+			patterns["question_type"] = word
+			break
+		}
+	}
+
+	// Extract action words
+	actionWords := []string{"deleted", "created", "modified", "accessed", "failed", "succeeded"}
+	for _, word := range actionWords {
+		if strings.Contains(strings.ToLower(query), word) {
+			patterns["action_type"] = word
+			break
+		}
+	}
+
+	// Extract time indicators
+	timeIndicators := []string{"yesterday", "today", "last week", "this week", "hour", "day", "week"}
+	for _, indicator := range timeIndicators {
+		if strings.Contains(strings.ToLower(query), indicator) {
+			patterns["time_indicator"] = indicator
+			break
+		}
+	}
+
+	return patterns
+}
+
+// createResponseSummary creates a summary of the response for context enrichment.
+func (cm *ContextManager) createResponseSummary(response *types.StructuredQuery) map[string]interface{} {
+	summary := make(map[string]interface{})
+
+	if response.LogSource != "" {
+		summary["log_source"] = response.LogSource
+	}
+
+	if !response.Verb.IsEmpty() {
+		summary["verb"] = response.Verb.GetValue()
+	}
+
+	if !response.Resource.IsEmpty() {
+		summary["resource"] = response.Resource.GetValue()
+	}
+
+	if response.Timeframe != "" {
+		summary["timeframe"] = response.Timeframe
+	}
+
+	if response.Limit > 0 {
+		summary["limit"] = response.Limit
+	}
+
+	return summary
+}
+
+// analyzeConversationFlow analyzes the conversation flow for context enrichment.
+func (cm *ContextManager) analyzeConversationFlow(context *types.ConversationContext) map[string]interface{} {
+	flow := make(map[string]interface{})
+
+	flow["total_interactions"] = len(context.ConversationHistory)
+	flow["session_duration"] = time.Since(context.CreatedAt).String()
+
+	if len(context.ConversationHistory) > 0 {
+		flow["last_interaction"] = context.ConversationHistory[len(context.ConversationHistory)-1].Timestamp
+	}
+
+	// Analyze conversation patterns
+	userQueries := 0
+	resourceQueries := 0
+	timeQueries := 0
+
+	for _, entry := range context.ConversationHistory {
+		query := strings.ToLower(entry.Query)
+		if strings.Contains(query, "who") || strings.Contains(query, "user") {
+			userQueries++
+		}
+		if strings.Contains(query, "what") || strings.Contains(query, "resource") || strings.Contains(query, "crd") {
+			resourceQueries++
+		}
+		if strings.Contains(query, "when") || strings.Contains(query, "time") {
+			timeQueries++
+		}
+	}
+
+	flow["user_focus"] = userQueries > 0
+	flow["resource_focus"] = resourceQueries > 0
+	flow["time_focus"] = timeQueries > 0
+
+	return flow
+}
+
+// runCleanup runs the session cleanup goroutine.
+func (cm *ContextManager) runCleanup() {
+	ticker := time.NewTicker(cm.cleanupInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			cm.cleanupExpiredSessions()
+		case <-cm.stopCleanup:
+			return
+		}
+	}
+}
+
+// cleanupExpiredSessions removes expired sessions from memory.
+func (cm *ContextManager) cleanupExpiredSessions() {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	expiredSessions := make([]string, 0)
+	for sessionID, context := range cm.sessions {
+		if context.IsExpired() {
+			expiredSessions = append(expiredSessions, sessionID)
+		}
+	}
+
+	for _, sessionID := range expiredSessions {
+		delete(cm.sessions, sessionID)
+	}
+
+	if len(expiredSessions) > 0 {
+		// Log cleanup activity (in a real implementation, this would use a proper logger)
+		fmt.Printf("Cleaned up %d expired sessions\n", len(expiredSessions))
+	}
 }
