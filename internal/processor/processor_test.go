@@ -200,6 +200,58 @@ func (m *mockSafetyValidator) GetApplicableRules() []interfaces.ValidationRule {
 	return []interfaces.ValidationRule{}
 }
 
+// spyProvider implements interfaces.LLMProvider and records whether GenerateResponse was called
+type spyProvider struct {
+	called bool
+}
+
+var _ interfaces.LLMProvider = (*spyProvider)(nil)
+
+func (s *spyProvider) GenerateResponse(ctx context.Context, request *types.ModelRequest) (*types.RawResponse, error) {
+	s.called = true
+	return &types.RawResponse{Content: `{"ok": true}`}, nil
+}
+
+func (s *spyProvider) GetModelInfo() types.ModelInfo {
+	return types.ModelInfo{Name: "claude-3-5-sonnet-20241022", Provider: "anthropic"}
+}
+
+func (s *spyProvider) SupportsStreaming() bool { return false }
+
+func (s *spyProvider) ValidateConnection() error { return nil }
+
+// engineWithProvider implements interfaces.LLMEngine and exposes GetProvider for direct provider access
+type engineWithProvider struct {
+	provider    interfaces.LLMProvider
+	adaptCalled bool
+}
+
+var _ interfaces.LLMEngine = (*engineWithProvider)(nil)
+
+func (e *engineWithProvider) ProcessQuery(ctx context.Context, query string, context types.ConversationContext) (*types.RawResponse, error) {
+	// Fallback path; should not be used when provider path is taken
+	return &types.RawResponse{Content: `fallback`}, nil
+}
+
+func (e *engineWithProvider) GetSupportedModels() []string {
+	return []string{"claude-3-5-sonnet-20241022"}
+}
+
+func (e *engineWithProvider) AdaptInput(req *types.InternalRequest) (*types.ModelRequest, error) {
+	e.adaptCalled = true
+	return &types.ModelRequest{
+		Model: "claude-3-5-sonnet-20241022",
+		Messages: []interface{}{
+			map[string]interface{}{"role": "user", "content": req.ProcessingRequest.Query},
+		},
+	}, nil
+}
+
+func (e *engineWithProvider) ValidateConnection() error { return nil }
+
+// Not part of the interface; used by the processor via type assertion
+func (e *engineWithProvider) GetProvider() interfaces.LLMProvider { return e.provider }
+
 // Test functions
 
 func TestNewGenAIProcessor(t *testing.T) {
@@ -626,6 +678,37 @@ func TestProcessQuery_WithCustomValidationResult(t *testing.T) {
 
 	if len(validation.Errors) == 0 {
 		t.Error("Expected validation errors")
+	}
+}
+
+// Ensure the processor uses AdaptInput and the direct provider path when the engine exposes GetProvider()
+func TestProcessQuery_UsesAdapterAndProviderDirectPath(t *testing.T) {
+	prov := &spyProvider{}
+	eng := &engineWithProvider{provider: prov}
+
+	processor := &GenAIProcessor{
+		contextManager:  newMockContextManager(),
+		llmEngine:       eng,
+		RetryParser:     newMockRetryParser(),
+		safetyValidator: newMockSafetyValidator(),
+		defaultModel:    "claude-3-5-sonnet-20241022",
+		logger:          log.New(log.Writer(), "[TestProcessor] ", log.LstdFlags),
+	}
+
+	req := &types.ProcessingRequest{Query: "test adapter path", SessionID: "sess-123"}
+	ctx := context.Background()
+	resp, err := processor.ProcessQuery(ctx, req)
+	if err != nil {
+		t.Fatalf("ProcessQuery returned error: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("Response should not be nil")
+	}
+	if !eng.adaptCalled {
+		t.Error("Expected AdaptInput to be called")
+	}
+	if !prov.called {
+		t.Error("Expected provider.GenerateResponse to be called directly via GetProvider path")
 	}
 }
 

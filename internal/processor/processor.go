@@ -113,8 +113,18 @@ func (p *GenAIProcessor) ProcessQuery(ctx context.Context, req *types.Processing
 		return p.createErrorResponse("context_resolution_failed", err), nil
 	}
 
-	// Step 2: Prepare internal request for LLM processing (for future use)
-	// TODO: Use InternalRequest when implementing input adaptation
+	// Step 2: Prepare internal request for LLM processing via input adapters
+	internalReq := &types.InternalRequest{
+		RequestID: fmt.Sprintf("%s-%d", req.SessionID, time.Now().UnixNano()),
+		ProcessingRequest: types.ProcessingRequest{
+			Query:     resolvedQuery,
+			SessionID: req.SessionID,
+			ModelType: req.ModelType,
+		},
+		ProcessingOptions: map[string]interface{}{
+			"original_query": req.Query,
+		},
+	}
 
 	// Step 3: Get conversation context for LLM
 	convContext, err := p.contextManager.GetContext(req.SessionID)
@@ -127,12 +137,35 @@ func (p *GenAIProcessor) ProcessQuery(ctx context.Context, req *types.Processing
 		}
 	}
 
-	// Step 4: LLM processing
-	p.logger.Printf("Sending query to LLM: %s", resolvedQuery)
-	rawResponse, err := p.llmEngine.ProcessQuery(ctx, resolvedQuery, *convContext)
+	// Step 4: Adapt input using engine's adapter and send to provider
+	p.logger.Printf("Adapting input via LLM engine adapter")
+	modelReq, err := p.llmEngine.AdaptInput(internalReq)
 	if err != nil {
-		p.logger.Printf("LLM processing failed: %v", err)
-		return p.createErrorResponse("llm_processing_failed", err), nil
+		p.logger.Printf("Input adaptation failed: %v", err)
+		return p.createErrorResponse("input_adaptation_failed", err), nil
+	}
+
+	p.logger.Printf("Sending adapted request to LLM provider")
+	// Prefer direct provider call if engine exposes provider; otherwise, fall back to existing ProcessQuery path
+	var rawResponse *types.RawResponse
+	type engineWithProvider interface {
+		GetProvider() interfaces.LLMProvider
+	}
+	if ep, ok := p.llmEngine.(engineWithProvider); ok {
+		provider := ep.GetProvider()
+		rawResponse, err = provider.GenerateResponse(ctx, modelReq)
+		if err != nil {
+			p.logger.Printf("Provider call failed: %v", err)
+			return p.createErrorResponse("llm_processing_failed", err), nil
+		}
+	} else {
+		// Backward compatibility: if engine cannot send ModelRequest directly, use existing ProcessQuery
+		p.logger.Printf("Engine does not expose provider send; using fallback ProcessQuery path")
+		rawResponse, err = p.llmEngine.ProcessQuery(ctx, resolvedQuery, *convContext)
+		if err != nil {
+			p.logger.Printf("LLM processing failed: %v", err)
+			return p.createErrorResponse("llm_processing_failed", err), nil
+		}
 	}
 
 	// Step 5: Response parsing with retry mechanism
@@ -246,6 +279,11 @@ func (e *simpleLLMEngine) ProcessQuery(ctx context.Context, query string, contex
 // GetSupportedModels returns the list of supported models
 func (e *simpleLLMEngine) GetSupportedModels() []string {
 	return []string{"claude-3-5-sonnet-20241022"}
+}
+
+// GetProvider exposes the underlying provider for direct calls when required
+func (e *simpleLLMEngine) GetProvider() interfaces.LLMProvider {
+	return e.provider
 }
 
 // AdaptInput adapts an internal request to model-specific format
