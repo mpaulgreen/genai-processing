@@ -1,7 +1,6 @@
 package validator
 
 import (
-	"fmt"
 	"testing"
 
 	"genai-processing/pkg/interfaces"
@@ -53,7 +52,7 @@ func TestSafetyValidator_ValidateQuery(t *testing.T) {
 		{
 			name:        "nil query",
 			query:       nil,
-			expectValid: true, // Stub implementation always returns true
+			expectValid: false, // Real implementation should reject nil queries
 		},
 		{
 			name: "complex query with arrays",
@@ -110,14 +109,16 @@ func TestSafetyValidator_ValidateQuery(t *testing.T) {
 				t.Error("ValidationResult.QuerySnapshot should match input query")
 			}
 
-			// Check that stub implementation includes expected warnings
-			if len(result.Warnings) == 0 {
-				t.Error("Stub implementation should include warnings about being a stub")
+			// Check that validation result includes proper details
+			if result.Details == nil {
+				t.Error("ValidationResult.Details should not be nil")
 			}
 
-			// Check that stub implementation includes recommendations
-			if len(result.Recommendations) == 0 {
-				t.Error("Stub implementation should include TODO recommendations")
+			// Check that validation result includes rule results
+			if ruleResults, ok := result.Details["rule_results"]; !ok {
+				t.Error("ValidationResult.Details should include rule_results")
+			} else if ruleResults == nil {
+				t.Error("rule_results should not be nil")
 			}
 		})
 	}
@@ -129,26 +130,40 @@ func TestSafetyValidator_GetApplicableRules(t *testing.T) {
 
 	rules := validator.GetApplicableRules()
 
-	// Stub implementation should return empty slice
+	// Real implementation should return active rules
 	if rules == nil {
 		t.Fatal("GetApplicableRules returned nil")
 	}
 
-	if len(rules) != 0 {
-		t.Errorf("Expected empty rules slice, got %d rules", len(rules))
+	if len(rules) == 0 {
+		t.Error("Expected at least one active rule, got 0 rules")
+	}
+
+	// Check that rules have proper names and descriptions
+	for _, rule := range rules {
+		if rule.GetRuleName() == "" {
+			t.Error("Rule should have a non-empty name")
+		}
+		if rule.GetRuleDescription() == "" {
+			t.Error("Rule should have a non-empty description")
+		}
+		if rule.GetSeverity() == "" {
+			t.Error("Rule should have a non-empty severity")
+		}
 	}
 }
 
-// TestSafetyValidator_StubBehavior tests that the stub implementation
-// behaves as expected with consistent results.
-func TestSafetyValidator_StubBehavior(t *testing.T) {
+// TestSafetyValidator_ConsistentBehavior tests that the implementation
+// behaves consistently with the same input.
+func TestSafetyValidator_ConsistentBehavior(t *testing.T) {
 	validator := NewSafetyValidator()
 
-	// Test multiple calls to ensure consistent stub behavior
+	// Test multiple calls to ensure consistent behavior
 	query := &types.StructuredQuery{
 		LogSource: "kube-apiserver",
-		Verb:      *types.NewStringOrArray("delete"),
+		Verb:      *types.NewStringOrArray("get"),
 		Resource:  *types.NewStringOrArray("pods"),
+		Limit:     20,
 	}
 
 	result1, err1 := validator.ValidateQuery(query)
@@ -159,29 +174,24 @@ func TestSafetyValidator_StubBehavior(t *testing.T) {
 		t.Fatal("Both validation calls should succeed")
 	}
 
-	// Both results should be valid (stub behavior)
+	// Both results should be valid for safe queries
 	if !result1.IsValid || !result2.IsValid {
-		t.Error("Stub implementation should always return valid results")
+		t.Error("Safe queries should return valid results")
 	}
 
 	// Both results should have the same rule name
 	if result1.RuleName != result2.RuleName {
-		t.Error("Stub implementation should return consistent rule names")
+		t.Error("Implementation should return consistent rule names")
 	}
 
 	// Both results should have the same severity
 	if result1.Severity != result2.Severity {
-		t.Error("Stub implementation should return consistent severity")
+		t.Error("Implementation should return consistent severity")
 	}
 
-	// Both results should include stub warnings
-	if len(result1.Warnings) == 0 || len(result2.Warnings) == 0 {
-		t.Error("Stub implementation should include warnings")
-	}
-
-	// Both results should include TODO recommendations
-	if len(result1.Recommendations) == 0 || len(result2.Recommendations) == 0 {
-		t.Error("Stub implementation should include recommendations")
+	// Both results should include proper details
+	if result1.Details == nil || result2.Details == nil {
+		t.Error("Results should include proper details")
 	}
 }
 
@@ -189,38 +199,366 @@ func TestSafetyValidator_StubBehavior(t *testing.T) {
 func TestSafetyValidator_ErrorHandling(t *testing.T) {
 	validator := NewSafetyValidator()
 
-	// Test with various edge cases that should not cause errors
-	edgeCases := []*types.StructuredQuery{
-		nil,
-		{},
+	// Test with various edge cases
+	edgeCases := []struct {
+		name        string
+		query       *types.StructuredQuery
+		expectValid bool
+	}{
 		{
-			LogSource: "",
-			Verb:      *types.NewStringOrArray(""),
-			Resource:  *types.NewStringOrArray([]string{}),
+			name:        "nil query",
+			query:       nil,
+			expectValid: false,
 		},
 		{
-			LogSource: "invalid-source",
-			Limit:     -1,
+			name:        "empty query",
+			query:       &types.StructuredQuery{},
+			expectValid: false, // Missing required log_source
+		},
+		{
+			name: "invalid log source",
+			query: &types.StructuredQuery{
+				LogSource: "invalid-source",
+			},
+			expectValid: false,
+		},
+		{
+			name: "invalid verb",
+			query: &types.StructuredQuery{
+				LogSource: "kube-apiserver",
+				Verb:      *types.NewStringOrArray("invalid-verb"),
+			},
+			expectValid: false,
+		},
+		{
+			name: "invalid resource",
+			query: &types.StructuredQuery{
+				LogSource: "kube-apiserver",
+				Resource:  *types.NewStringOrArray("invalid-resource"),
+			},
+			expectValid: false,
+		},
+		{
+			name: "exceeds limit",
+			query: &types.StructuredQuery{
+				LogSource: "kube-apiserver",
+				Limit:     2000, // Exceeds max limit
+			},
+			expectValid: false,
 		},
 	}
 
-	for i, query := range edgeCases {
-		t.Run(fmt.Sprintf("edge_case_%d", i), func(t *testing.T) {
-			result, err := validator.ValidateQuery(query)
+	for _, tt := range edgeCases {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := validator.ValidateQuery(tt.query)
 
-			// Stub implementation should never return errors
+			// Implementation should never return errors
 			if err != nil {
-				t.Errorf("Stub implementation should not return errors, got: %v", err)
+				t.Errorf("Implementation should not return errors, got: %v", err)
 			}
 
-			// Result should always be valid in stub implementation
+			// Result should not be nil
 			if result == nil {
 				t.Fatal("Result should not be nil")
 			}
 
-			if !result.IsValid {
-				t.Error("Stub implementation should always return valid results")
+			// Check validation result matches expectation
+			if result.IsValid != tt.expectValid {
+				t.Errorf("Expected IsValid to be %v, got %v", tt.expectValid, result.IsValid)
+			}
+
+			// Invalid queries should have errors
+			if !tt.expectValid && len(result.Errors) == 0 {
+				t.Error("Invalid queries should have validation errors")
 			}
 		})
+	}
+}
+
+// TestSafetyValidator_WhitelistValidation tests whitelist validation specifically
+func TestSafetyValidator_WhitelistValidation(t *testing.T) {
+	validator := NewSafetyValidator()
+
+	tests := []struct {
+		name        string
+		query       *types.StructuredQuery
+		expectValid bool
+	}{
+		{
+			name: "valid log source",
+			query: &types.StructuredQuery{
+				LogSource: "kube-apiserver",
+			},
+			expectValid: true,
+		},
+		{
+			name: "invalid log source",
+			query: &types.StructuredQuery{
+				LogSource: "invalid-source",
+			},
+			expectValid: false,
+		},
+		{
+			name: "valid verb",
+			query: &types.StructuredQuery{
+				LogSource: "kube-apiserver",
+				Verb:      *types.NewStringOrArray("get"),
+			},
+			expectValid: true,
+		},
+		{
+			name: "invalid verb",
+			query: &types.StructuredQuery{
+				LogSource: "kube-apiserver",
+				Verb:      *types.NewStringOrArray("invalid-verb"),
+			},
+			expectValid: false,
+		},
+		{
+			name: "valid resource",
+			query: &types.StructuredQuery{
+				LogSource: "kube-apiserver",
+				Resource:  *types.NewStringOrArray("pods"),
+			},
+			expectValid: true,
+		},
+		{
+			name: "invalid resource",
+			query: &types.StructuredQuery{
+				LogSource: "kube-apiserver",
+				Resource:  *types.NewStringOrArray("invalid-resource"),
+			},
+			expectValid: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := validator.ValidateQuery(tt.query)
+			if err != nil {
+				t.Fatalf("ValidateQuery returned error: %v", err)
+			}
+
+			if result.IsValid != tt.expectValid {
+				t.Errorf("Expected IsValid to be %v, got %v", tt.expectValid, result.IsValid)
+			}
+		})
+	}
+}
+
+// TestSafetyValidator_TimeframeValidation tests timeframe validation specifically
+func TestSafetyValidator_TimeframeValidation(t *testing.T) {
+	validator := NewSafetyValidator()
+
+	tests := []struct {
+		name        string
+		query       *types.StructuredQuery
+		expectValid bool
+	}{
+		{
+			name: "valid timeframe",
+			query: &types.StructuredQuery{
+				LogSource: "kube-apiserver",
+				Timeframe: "today",
+			},
+			expectValid: true,
+		},
+		{
+			name: "invalid timeframe",
+			query: &types.StructuredQuery{
+				LogSource: "kube-apiserver",
+				Timeframe: "invalid-timeframe",
+			},
+			expectValid: false,
+		},
+		{
+			name: "valid limit",
+			query: &types.StructuredQuery{
+				LogSource: "kube-apiserver",
+				Limit:     100,
+			},
+			expectValid: true,
+		},
+		{
+			name: "exceeds max limit",
+			query: &types.StructuredQuery{
+				LogSource: "kube-apiserver",
+				Limit:     2000,
+			},
+			expectValid: false,
+		},
+		{
+			name: "below min limit",
+			query: &types.StructuredQuery{
+				LogSource: "kube-apiserver",
+				Limit:     -1,
+			},
+			expectValid: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := validator.ValidateQuery(tt.query)
+			if err != nil {
+				t.Fatalf("ValidateQuery returned error: %v", err)
+			}
+
+			if result.IsValid != tt.expectValid {
+				t.Errorf("Expected IsValid to be %v, got %v", tt.expectValid, result.IsValid)
+			}
+		})
+	}
+}
+
+// TestSafetyValidator_SanitizationValidation tests sanitization validation specifically
+func TestSafetyValidator_SanitizationValidation(t *testing.T) {
+	validator := NewSafetyValidator()
+
+	tests := []struct {
+		name        string
+		query       *types.StructuredQuery
+		expectValid bool
+	}{
+		{
+			name: "valid pattern",
+			query: &types.StructuredQuery{
+				LogSource:           "kube-apiserver",
+				ResourceNamePattern: "valid-pattern",
+			},
+			expectValid: true,
+		},
+		{
+			name: "pattern with forbidden characters",
+			query: &types.StructuredQuery{
+				LogSource:           "kube-apiserver",
+				ResourceNamePattern: "pattern<script>",
+			},
+			expectValid: false,
+		},
+		{
+			name: "valid user pattern",
+			query: &types.StructuredQuery{
+				LogSource:   "kube-apiserver",
+				UserPattern: "valid-user",
+			},
+			expectValid: true,
+		},
+		{
+			name: "user pattern with forbidden characters",
+			query: &types.StructuredQuery{
+				LogSource:   "kube-apiserver",
+				UserPattern: "user;rm -rf",
+			},
+			expectValid: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := validator.ValidateQuery(tt.query)
+			if err != nil {
+				t.Fatalf("ValidateQuery returned error: %v", err)
+			}
+
+			if result.IsValid != tt.expectValid {
+				t.Errorf("Expected IsValid to be %v, got %v", tt.expectValid, result.IsValid)
+			}
+		})
+	}
+}
+
+// TestSafetyValidator_PatternsValidation tests forbidden patterns validation specifically
+func TestSafetyValidator_PatternsValidation(t *testing.T) {
+	validator := NewSafetyValidator()
+
+	tests := []struct {
+		name        string
+		query       *types.StructuredQuery
+		expectValid bool
+	}{
+		{
+			name: "safe query",
+			query: &types.StructuredQuery{
+				LogSource: "kube-apiserver",
+				Verb:      *types.NewStringOrArray("get"),
+				Resource:  *types.NewStringOrArray("pods"),
+			},
+			expectValid: true,
+		},
+		{
+			name: "dangerous user pattern",
+			query: &types.StructuredQuery{
+				LogSource:   "kube-apiserver",
+				UserPattern: "system:admin",
+			},
+			expectValid: false,
+		},
+		{
+			name: "dangerous namespace pattern",
+			query: &types.StructuredQuery{
+				LogSource:        "kube-apiserver",
+				NamespacePattern: "kube-system",
+			},
+			expectValid: false,
+		},
+		{
+			name: "dangerous URI pattern",
+			query: &types.StructuredQuery{
+				LogSource:         "kube-apiserver",
+				RequestURIPattern: "/api/v1/pods/.*/exec",
+			},
+			expectValid: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := validator.ValidateQuery(tt.query)
+			if err != nil {
+				t.Fatalf("ValidateQuery returned error: %v", err)
+			}
+
+			if result.IsValid != tt.expectValid {
+				t.Errorf("Expected IsValid to be %v, got %v", tt.expectValid, result.IsValid)
+			}
+		})
+	}
+}
+
+// TestSafetyValidator_GetValidationStats tests the GetValidationStats method
+func TestSafetyValidator_GetValidationStats(t *testing.T) {
+	validator := NewSafetyValidator()
+
+	stats := validator.GetValidationStats()
+
+	// Check that stats contains expected fields
+	if stats["total_active_rules"] == nil {
+		t.Error("Stats should contain total_active_rules")
+	}
+
+	if stats["whitelist_enabled"] == nil {
+		t.Error("Stats should contain whitelist_enabled")
+	}
+
+	if stats["sanitization_enabled"] == nil {
+		t.Error("Stats should contain sanitization_enabled")
+	}
+
+	if stats["timeframe_enabled"] == nil {
+		t.Error("Stats should contain timeframe_enabled")
+	}
+
+	if stats["patterns_enabled"] == nil {
+		t.Error("Stats should contain patterns_enabled")
+	}
+
+	// Check that at least one rule is enabled
+	totalRules, ok := stats["total_active_rules"].(int)
+	if !ok {
+		t.Error("total_active_rules should be an int")
+	}
+	if totalRules == 0 {
+		t.Error("At least one validation rule should be active")
 	}
 }

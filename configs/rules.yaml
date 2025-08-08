@@ -1,0 +1,277 @@
+# Safety Validation Rules Configuration
+# This file defines all validation rules for OpenShift audit query safety
+
+safety_rules:
+  # Allowed log sources for audit queries
+  allowed_log_sources:
+    - "kube-apiserver"
+    - "openshift-apiserver"
+    - "oauth-server"
+    - "oauth-apiserver"
+  
+  # Allowed HTTP verbs for audit queries
+  allowed_verbs:
+    - "get"
+    - "list"
+    - "create"
+    - "update"
+    - "patch"
+    - "delete"
+    - "watch"
+  
+  # Allowed Kubernetes resources for audit queries
+  allowed_resources:
+    - "pods"
+    - "services"
+    - "deployments"
+    - "configmaps"
+    - "secrets"
+    - "namespaces"
+    - "serviceaccounts"
+    - "roles"
+    - "rolebindings"
+    - "clusterroles"
+    - "clusterrolebindings"
+    - "customresourcedefinitions"
+    - "persistentvolumeclaims"
+    - "persistentvolumes"
+    - "networkpolicies"
+    - "validatingwebhookconfigurations"
+    - "mutatingwebhookconfigurations"
+    - "events"
+    - "nodes"
+    - "replicasets"
+    - "statefulsets"
+    - "daemonsets"
+    - "ingresses"
+    - "routes"
+    - "builds"
+    - "buildconfigs"
+    - "imagestreams"
+    - "imagestreamtags"
+    - "projects"
+    - "users"
+    - "groups"
+    - "oauthclients"
+    - "oauthaccesstokens"
+    - "oauthauthorizetokens"
+  
+  # Forbidden patterns that indicate potential security issues
+  forbidden_patterns:
+    # Dangerous command patterns
+    - "rm -rf"
+    - "delete --all"
+    - "delete --force"
+    - "delete --grace-period=0"
+    - "delete --cascade=true"
+    - "delete --orphan-dependents=false"
+    
+    # Dangerous user patterns
+    - "system:admin"
+    - "system:masters"
+    - "cluster-admin"
+    - "admin"
+    
+    # Dangerous resource patterns
+    - "kube-system"
+    - "openshift-.*"
+    - "default"
+    - "kube-public"
+    - "kube-node-lease"
+    
+    # Dangerous namespace patterns
+    - "kube-system"
+    - "openshift-.*"
+    - "default"
+    - "kube-public"
+    - "kube-node-lease"
+    - "security"
+    - "prod.*"
+    - "production"
+    
+    # Dangerous URI patterns
+    - "/api/v1/namespaces/.*/finalize"
+    - "/api/v1/namespaces/.*/status"
+    - "/api/v1/nodes/.*/proxy"
+    - "/api/v1/nodes/.*/status"
+    - "/api/v1/pods/.*/exec"
+    - "/api/v1/pods/.*/attach"
+    - "/api/v1/pods/.*/portforward"
+    - "/api/v1/pods/.*/log"
+    - "/api/v1/pods/.*/proxy"
+    - "/api/v1/services/.*/proxy"
+    - "/api/v1/namespaces/.*/pods/.*/exec"
+    - "/api/v1/namespaces/.*/pods/.*/attach"
+    - "/api/v1/namespaces/.*/pods/.*/portforward"
+    - "/api/v1/namespaces/.*/pods/.*/log"
+    - "/api/v1/namespaces/.*/pods/.*/proxy"
+    - "/api/v1/namespaces/.*/services/.*/proxy"
+  
+  # Timeframe limits for audit queries
+  timeframe_limits:
+    max_days_back: 90
+    default_limit: 20
+    max_limit: 1000
+    min_limit: 1
+    
+    # Allowed timeframe values
+    allowed_timeframes:
+      - "today"
+      - "yesterday"
+      - "1_hour_ago"
+      - "2_hours_ago"
+      - "3_hours_ago"
+      - "6_hours_ago"
+      - "12_hours_ago"
+      - "1_day_ago"
+      - "2_days_ago"
+      - "3_days_ago"
+      - "7_days_ago"
+      - "14_days_ago"
+      - "30_days_ago"
+      - "60_days_ago"
+      - "90_days_ago"
+  
+  # Input sanitization rules
+  sanitization:
+    # Maximum length limits
+    max_query_length: 10000
+    max_pattern_length: 500
+    max_user_pattern_length: 200
+    max_namespace_pattern_length: 200
+    max_resource_pattern_length: 200
+    
+    # Regex patterns for validation
+    valid_regex_pattern: "^[a-zA-Z0-9\\-_\\*\\.\\?\\+\\[\\]\\{\\}\\(\\)\\|\\\\/\\s]+$"
+    valid_ip_pattern: "^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$"
+    valid_namespace_pattern: "^[a-z0-9]([a-z0-9\\-]*[a-z0-9])?$"
+    valid_resource_pattern: "^[a-z]([a-z0-9\\-]*[a-z0-9])?$"
+    
+    # Forbidden characters in patterns
+    forbidden_chars:
+      - "<"
+      - ">"
+      - "&"
+      - "\""
+      - "'"
+      - "`"
+      - "|"
+      - ";"
+      - "$"
+      - "("
+      - ")"
+      - "{"
+      - "}"
+      - "["
+      - "]"
+      - "\\"
+      - "/"
+      - "!"
+      - "@"
+      - "#"
+      - "%"
+      - "^"
+      - "*"
+      - "+"
+      - "="
+      - "~"
+  
+  # Required fields for validation
+  required_fields:
+    - "log_source"
+  
+  # Query limits and constraints
+  query_limits:
+    max_exclude_users: 50
+    max_exclude_resources: 50
+    max_group_by_fields: 5
+    max_sort_fields: 3
+    
+    # Maximum number of items in arrays
+    max_verb_array_size: 10
+    max_resource_array_size: 20
+    max_namespace_array_size: 50
+    max_user_array_size: 100
+    max_response_status_array_size: 10
+    max_source_ip_array_size: 20
+  
+  # Business hours configuration
+  business_hours:
+    default_start_hour: 9
+    default_end_hour: 17
+    default_timezone: "UTC"
+    max_hour_value: 23
+    min_hour_value: 0
+  
+  # Analysis configuration limits
+  analysis_limits:
+    max_threshold_value: 10000
+    min_threshold_value: 1
+    allowed_analysis_types:
+      - "multi_namespace_access"
+      - "excessive_reads"
+      - "privilege_escalation"
+      - "anomaly_detection"
+      - "correlation"
+    
+    allowed_time_windows:
+      - "short"
+      - "medium"
+      - "long"
+    
+    allowed_sort_fields:
+      - "timestamp"
+      - "user"
+      - "resource"
+      - "count"
+    
+    allowed_sort_orders:
+      - "asc"
+      - "desc"
+  
+  # Response status validation
+  response_status:
+    allowed_status_codes:
+      - "200"
+      - "201"
+      - "204"
+      - "400"
+      - "401"
+      - "403"
+      - "404"
+      - "409"
+      - "422"
+      - "500"
+      - "502"
+      - "503"
+      - "504"
+    
+    # Status code ranges
+    min_status_code: 100
+    max_status_code: 599
+  
+  # Authentication decision validation
+  auth_decisions:
+    allowed_decisions:
+      - "allow"
+      - "error"
+      - "forbid"
+  
+  # Severity levels for validation rules
+  severity_levels:
+    - "critical"
+    - "high"
+    - "medium"
+    - "low"
+    - "info"
+    - "warning"
+  
+  # Rule categories
+  rule_categories:
+    - "whitelist"
+    - "sanitization"
+    - "timeframe"
+    - "limits"
+    - "patterns"
+    - "injection"
+    - "business_rules"
