@@ -72,9 +72,18 @@ func NewGenAIProcessor() *GenAIProcessor {
 	// Register parsers for different strategies
 	claudeExtractor := extractors.NewClaudeExtractor()
 	openaiExtractor := extractors.NewOpenAIExtractor()
+	genericExtractor := extractors.NewGenericExtractor()
 
-	retryParser.RegisterParser(recovery.StrategySpecific, claudeExtractor)
-	retryParser.RegisterParser(recovery.StrategyGeneric, openaiExtractor)
+	// Combine Claude and OpenAI into a single "specific" parser that selects by modelType
+	specificParser := &multiModelParser{
+		claude: claudeExtractor,
+		openai: openaiExtractor,
+	}
+
+	// Specific: model-specific parsing (Claude or OpenAI)
+	retryParser.RegisterParser(recovery.StrategySpecific, specificParser)
+	// Generic: model-agnostic, regex-based JSON extraction as a universal fallback
+	retryParser.RegisterParser(recovery.StrategyGeneric, genericExtractor)
 
 	// Create safety validator
 	safetyValidator := validator.NewSafetyValidator()
@@ -295,6 +304,47 @@ func (e *simpleLLMEngine) ValidateConnection() error {
 	return nil
 }
 
+// multiModelParser delegates to Claude or OpenAI extractors based on modelType
+type multiModelParser struct {
+	claude interfaces.Parser
+	openai interfaces.Parser
+}
+
+func (m *multiModelParser) ParseResponse(raw *types.RawResponse, modelType string) (*types.StructuredQuery, error) {
+	// Prefer a model-specific parser if it CanHandle the given modelType
+	if m.claude != nil && m.claude.CanHandle(modelType) {
+		return m.claude.ParseResponse(raw, modelType)
+	}
+	if m.openai != nil && m.openai.CanHandle(modelType) {
+		return m.openai.ParseResponse(raw, modelType)
+	}
+	// Default to OpenAI parser if modelType is unknown (it has robust JSON handling)
+	if m.openai != nil {
+		return m.openai.ParseResponse(raw, modelType)
+	}
+	// Fallback to Claude if OpenAI unavailable
+	if m.claude != nil {
+		return m.claude.ParseResponse(raw, modelType)
+	}
+	return nil, fmt.Errorf("no underlying parser available")
+}
+
+func (m *multiModelParser) CanHandle(modelType string) bool {
+	if m.claude != nil && m.claude.CanHandle(modelType) {
+		return true
+	}
+	if m.openai != nil && m.openai.CanHandle(modelType) {
+		return true
+	}
+	// Accept unknown to allow delegation in ParseResponse
+	return true
+}
+
+func (m *multiModelParser) GetConfidence() float64 {
+	// Return a conservative default
+	return 0.8
+}
+
 // getSystemPrompt returns the system prompt for OpenShift audit queries
 func getSystemPrompt() string {
 	return `You are an OpenShift audit query specialist. Convert natural language queries into structured JSON parameters for audit log analysis.
@@ -313,8 +363,6 @@ The JSON should follow this structure:
   "exclude_users": ["system:", "kube-"],
   "resource_name_pattern": "pattern",
   "auth_decision": "allow|error|forbid"
-}
-
 Examples:
 - "Who deleted the customer CRD yesterday?" → {"log_source": "kube-apiserver", "verb": "delete", "resource": "customresourcedefinitions", "resource_name_pattern": "customer", "timeframe": "yesterday", "exclude_users": ["system:"], "limit": 20}
 - "Show me all failed authentication attempts in the last hour" → {"log_source": "oauth-server", "timeframe": "1_hour_ago", "auth_decision": "error", "limit": 20}`

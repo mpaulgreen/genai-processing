@@ -229,6 +229,36 @@ func TestLoadConfigFromFile(t *testing.T) {
 	tempDir := t.TempDir()
 	loader := NewLoader(tempDir)
 
+	// Ensure deterministic environment (unset server-related overrides that could affect this test)
+	envKeys := []string{
+		"SERVER_PORT",
+		"SERVER_HOST",
+		"SERVER_READ_TIMEOUT",
+		"SERVER_WRITE_TIMEOUT",
+		"SERVER_IDLE_TIMEOUT",
+		"SERVER_SHUTDOWN_TIMEOUT",
+		"SERVER_MAX_REQUEST_SIZE",
+	}
+	original := make(map[string]*string)
+	for _, k := range envKeys {
+		if v, ok := os.LookupEnv(k); ok {
+			vv := v
+			original[k] = &vv
+			os.Unsetenv(k)
+		} else {
+			original[k] = nil
+		}
+	}
+	defer func() {
+		for k, v := range original {
+			if v == nil {
+				os.Unsetenv(k)
+			} else {
+				os.Setenv(k, *v)
+			}
+		}
+	}()
+
 	// Create a complete config file
 	configYAML := `
 server:

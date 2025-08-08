@@ -52,6 +52,14 @@ func (f *ProviderFactory) CreateProvider(modelType string) (interfaces.LLMProvid
 		return NewClaudeProvider(config.APIKey, config.Endpoint), nil
 	case "openai":
 		return NewOpenAIProviderWithConfig(config.APIKey, config.Endpoint, config.ModelName, config.Parameters), nil
+	case "generic":
+		var headers map[string]string
+		if config.Parameters != nil {
+			if h, ok := config.Parameters["headers"].(map[string]string); ok {
+				headers = h
+			}
+		}
+		return NewGenericProvider(config.APIKey, config.Endpoint, config.ModelName, headers, config.Parameters), nil
 	default:
 		return nil, fmt.Errorf("unsupported provider type: %s", modelType)
 	}
@@ -59,7 +67,7 @@ func (f *ProviderFactory) CreateProvider(modelType string) (interfaces.LLMProvid
 
 // GetSupportedProviders returns a list of all supported provider types
 func (f *ProviderFactory) GetSupportedProviders() []string {
-	supported := []string{"claude", "openai"}
+	supported := []string{"claude", "openai", "generic"}
 
 	// Return intersection of supported and registered providers
 	result := make([]string, 0)
@@ -93,7 +101,7 @@ func (f *ProviderFactory) ValidateProvider(providerType string) error {
 	}
 
 	// Check if provider type is supported
-	supported := []string{"claude", "openai"}
+	supported := []string{"claude", "openai", "generic"}
 	isSupported := false
 	for _, supportedType := range supported {
 		if providerType == supportedType {
@@ -132,6 +140,14 @@ func (f *ProviderFactory) CreateProviderWithConfig(providerType string, config *
 		return NewClaudeProvider(config.APIKey, config.Endpoint), nil
 	case "openai":
 		return NewOpenAIProviderWithConfig(config.APIKey, config.Endpoint, config.ModelName, config.Parameters), nil
+	case "generic":
+		var headers map[string]string
+		if config.Parameters != nil {
+			if h, ok := config.Parameters["headers"].(map[string]string); ok {
+				headers = h
+			}
+		}
+		return NewGenericProvider(config.APIKey, config.Endpoint, config.ModelName, headers, config.Parameters), nil
 	default:
 		return nil, fmt.Errorf("unsupported provider type: %s", providerType)
 	}
@@ -159,6 +175,16 @@ func (f *ProviderFactory) GetDefaultConfig(providerType string) *types.ProviderC
 				"max_tokens":  4000,
 				"temperature": 0.1,
 				"top_p":       1.0,
+			},
+		}
+	case "generic":
+		return &types.ProviderConfig{
+			APIKey:    "", // Optional depending on endpoint
+			Endpoint:  "https://api.openai.com/v1/chat/completions",
+			ModelName: "generic-model",
+			Parameters: map[string]interface{}{
+				"max_tokens":  4000,
+				"temperature": 0.1,
 			},
 		}
 	default:

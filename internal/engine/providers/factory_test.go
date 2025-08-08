@@ -127,6 +127,20 @@ func TestProviderFactory_CreateProvider(t *testing.T) {
 		t.Fatalf("Failed to register openai provider: %v", err)
 	}
 
+	// Register a generic provider
+	genericConfig := &types.ProviderConfig{
+		APIKey:    "test-key",
+		Endpoint:  "https://api.openai.com/v1/chat/completions",
+		ModelName: "generic-model",
+		Parameters: map[string]interface{}{
+			"headers": map[string]string{"Authorization": "Bearer test-key"},
+		},
+	}
+	err = factory.RegisterProvider("generic", genericConfig)
+	if err != nil {
+		t.Fatalf("Failed to register generic provider: %v", err)
+	}
+
 	tests := []struct {
 		name      string
 		modelType string
@@ -140,6 +154,11 @@ func TestProviderFactory_CreateProvider(t *testing.T) {
 		{
 			name:      "supported openai provider",
 			modelType: "openai",
+			wantErr:   false,
+		},
+		{
+			name:      "supported generic provider",
+			modelType: "generic",
 			wantErr:   false,
 		},
 		{
@@ -198,6 +217,14 @@ func TestProviderFactory_CreateProvider(t *testing.T) {
 					}
 					if maxTokens, ok := openaiProvider.Parameters["max_tokens"].(int); !ok || maxTokens != 4000 {
 						t.Errorf("OpenAI provider max_tokens = %v, want 4000", maxTokens)
+					}
+				case "generic":
+					if _, ok := provider.(*GenericProvider); !ok {
+						t.Error("CreateProvider() returned wrong provider type for generic")
+					}
+					gp := provider.(*GenericProvider)
+					if gp.ModelName != "generic-model" {
+						t.Errorf("Generic provider ModelName = %s, want generic-model", gp.ModelName)
 					}
 				}
 			}
@@ -299,6 +326,17 @@ func TestProviderFactory_GetProviderConfig(t *testing.T) {
 		t.Fatalf("Failed to register openai provider: %v", err)
 	}
 
+	// Register a generic provider
+	genericConfig := &types.ProviderConfig{
+		APIKey:    "test-key",
+		Endpoint:  "https://api.openai.com/v1/chat/completions",
+		ModelName: "generic-model",
+	}
+	err = factory.RegisterProvider("generic", genericConfig)
+	if err != nil {
+		t.Fatalf("Failed to register generic provider: %v", err)
+	}
+
 	tests := []struct {
 		name         string
 		providerType string
@@ -312,6 +350,11 @@ func TestProviderFactory_GetProviderConfig(t *testing.T) {
 		{
 			name:         "existing openai provider",
 			providerType: "openai",
+			wantErr:      false,
+		},
+		{
+			name:         "existing generic provider",
+			providerType: "generic",
 			wantErr:      false,
 		},
 		{
@@ -361,6 +404,11 @@ func TestProviderFactory_GetProviderConfig(t *testing.T) {
 							}
 						}
 					}
+					if tt.providerType == "generic" {
+						if config.ModelName != "generic-model" {
+							t.Errorf("GetProviderConfig() expected model name 'generic-model', got '%s'", config.ModelName)
+						}
+					}
 				}
 			}
 		})
@@ -383,6 +431,12 @@ func TestProviderFactory_ValidateProvider(t *testing.T) {
 		{
 			name:         "valid registered openai provider",
 			providerType: "openai",
+			register:     true,
+			wantErr:      false,
+		},
+		{
+			name:         "valid registered generic provider",
+			providerType: "generic",
 			register:     true,
 			wantErr:      false,
 		},
@@ -420,6 +474,10 @@ func TestProviderFactory_ValidateProvider(t *testing.T) {
 				if tt.providerType == "openai" {
 					config.Endpoint = "https://api.openai.com/v1/chat/completions"
 					config.ModelName = "gpt-4"
+				}
+				if tt.providerType == "generic" {
+					config.Endpoint = "https://api.openai.com/v1/chat/completions"
+					config.ModelName = "generic-model"
 				}
 				err := factory.RegisterProvider(tt.providerType, config)
 				if err != nil {
@@ -471,6 +529,21 @@ func TestProviderFactory_CreateProviderWithConfig(t *testing.T) {
 					"max_tokens":  4000,
 					"temperature": 0.1,
 					"top_p":       1.0,
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name:         "valid generic provider",
+			providerType: "generic",
+			config: &types.ProviderConfig{
+				APIKey:    "test-key",
+				Endpoint:  "https://api.openai.com/v1/chat/completions",
+				ModelName: "generic-model",
+				Parameters: map[string]interface{}{
+					"max_tokens":  4000,
+					"temperature": 0.1,
+					"headers":     map[string]string{"Authorization": "Bearer test-key"},
 				},
 			},
 			wantErr: false,
@@ -550,6 +623,10 @@ func TestProviderFactory_CreateProviderWithConfig(t *testing.T) {
 					if temp, ok := openaiProvider.Parameters["temperature"].(float64); !ok || temp != 0.1 {
 						t.Errorf("OpenAI provider temperature = %v, want 0.1", temp)
 					}
+				case "generic":
+					if _, ok := provider.(*GenericProvider); !ok {
+						t.Error("CreateProviderWithConfig() returned wrong provider type for generic")
+					}
 				}
 			}
 		})
@@ -572,6 +649,11 @@ func TestProviderFactory_GetDefaultConfig(t *testing.T) {
 		{
 			name:         "openai provider",
 			providerType: "openai",
+			expectNil:    false,
+		},
+		{
+			name:         "generic provider",
+			providerType: "generic",
 			expectNil:    false,
 		},
 		{
@@ -648,6 +730,28 @@ func TestProviderFactory_GetDefaultConfig(t *testing.T) {
 						}
 						if topP, ok := config.Parameters["top_p"].(float64); !ok || topP != 1.0 {
 							t.Errorf("GetDefaultConfig() expected top_p 1.0, got %v", topP)
+						}
+					}
+				}
+				// Verify generic config
+				if tt.providerType == "generic" {
+					if config.APIKey != "" {
+						t.Error("GetDefaultConfig() expected empty API key for generic")
+					}
+					if config.Endpoint != "https://api.openai.com/v1/chat/completions" {
+						t.Errorf("GetDefaultConfig() expected endpoint 'https://api.openai.com/v1/chat/completions', got '%s'", config.Endpoint)
+					}
+					if config.ModelName != "generic-model" {
+						t.Errorf("GetDefaultConfig() expected model name 'generic-model', got '%s'", config.ModelName)
+					}
+					if config.Parameters == nil {
+						t.Error("GetDefaultConfig() expected parameters map")
+					} else {
+						if maxTokens, ok := config.Parameters["max_tokens"].(int); !ok || maxTokens != 4000 {
+							t.Errorf("GetDefaultConfig() expected max_tokens 4000, got %v", maxTokens)
+						}
+						if temp, ok := config.Parameters["temperature"].(float64); !ok || temp != 0.1 {
+							t.Errorf("GetDefaultConfig() expected temperature 0.1, got %v", temp)
 						}
 					}
 				}
