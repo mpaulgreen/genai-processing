@@ -21,6 +21,11 @@ type ContextManager interface {
 	//   - error: Any error that occurred during context update
 	UpdateContext(sessionID string, query string, response *types.StructuredQuery) error
 
+	// UpdateContextWithUser updates context and associates it with a validated user ID.
+	// If the session does not exist, it will be created with the provided user ID.
+	// Implementations should validate and sanitize the user ID before storing.
+	UpdateContextWithUser(sessionID string, userID string, query string, response *types.StructuredQuery) error
+
 	// ResolvePronouns resolves pronouns and references in a query using conversation context.
 	// This method handles the resolution of pronouns like "he", "she", "that user",
 	// "around that time", etc., by referencing the conversation history.

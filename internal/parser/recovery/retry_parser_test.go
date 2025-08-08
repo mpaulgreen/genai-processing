@@ -128,6 +128,10 @@ func (m *MockContextManager) UpdateContext(sessionID string, query string, respo
 	return nil
 }
 
+func (m *MockContextManager) UpdateContextWithUser(sessionID string, userID string, query string, response *types.StructuredQuery) error {
+	return nil
+}
+
 func (m *MockContextManager) ResolvePronouns(query string, sessionID string) (string, error) {
 	return query, nil
 }

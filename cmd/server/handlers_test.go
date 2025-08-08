@@ -11,6 +11,30 @@ import (
 	"genai-processing/pkg/types"
 )
 
+func TestExtractUserIDFromAuthHeader(t *testing.T) {
+	tests := []struct {
+		name     string
+		header   string
+		expected string
+	}{
+		{name: "valid_bearer_user_prefix", header: "Bearer user:alice", expected: "alice"},
+		{name: "missing_scheme", header: "user:alice", expected: ""},
+		{name: "empty_header", header: "", expected: ""},
+		{name: "non_user_token_bearer", header: "Bearer abc.def", expected: ""},
+		{name: "different_scheme", header: "Basic abc", expected: ""},
+		{name: "bearer_with_space_only", header: "Bearer ", expected: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractUserIDFromAuthHeader(tt.header)
+			if got != tt.expected {
+				t.Fatalf("extractUserIDFromAuthHeader(%q) = %q, want %q", tt.header, got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestHealthHandler(t *testing.T) {
 	// Create a test request
 	req, err := http.NewRequest("GET", "/health", nil)

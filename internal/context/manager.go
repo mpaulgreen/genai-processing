@@ -63,8 +63,8 @@ func (cm *ContextManager) UpdateContext(sessionID string, query string, response
 	// Get or create session context
 	context, exists := cm.sessions[sessionID]
 	if !exists {
-		// Create new session context if it doesn't exist
-		context = types.NewConversationContext(sessionID, "") // TODO: Extract user ID from session or request
+		// Create new session context with unknown user
+		context = types.NewConversationContext(sessionID, "")
 		cm.sessions[sessionID] = context
 	} else {
 		// Update last activity and extend expiration for existing session
@@ -85,6 +85,64 @@ func (cm *ContextManager) UpdateContext(sessionID string, query string, response
 	cm.enrichContext(context, query, response)
 
 	return nil
+}
+
+// UpdateContextWithUser updates or creates a session context with the provided, validated user ID.
+func (cm *ContextManager) UpdateContextWithUser(sessionID string, userID string, query string, response *types.StructuredQuery) error {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	sanitizedUserID := sanitizeUserID(userID)
+
+	// Get or create session context
+	context, exists := cm.sessions[sessionID]
+	if !exists {
+		context = types.NewConversationContext(sessionID, sanitizedUserID)
+		cm.sessions[sessionID] = context
+	} else {
+		// If user is not set, or different (and new is non-empty), update it
+		if sanitizedUserID != "" && context.UserID != sanitizedUserID {
+			context.UserID = sanitizedUserID
+		}
+		context.LastActivity = time.Now()
+		context.ExtendExpiration(cm.sessionTimeout)
+	}
+
+	// Extract and store resolved references from the response
+	resolvedRefs := cm.extractReferencesFromResponse(response)
+
+	// Add conversation entry to history
+	context.AddConversationEntry(query, response, resolvedRefs)
+
+	// Update resolved references for future pronoun resolution
+	cm.updateResolvedReferences(context, response, resolvedRefs)
+
+	// Enrich context with additional information
+	cm.enrichContext(context, query, response)
+
+	return nil
+}
+
+// sanitizeUserID performs basic validation and sanitization of a user ID.
+// It strips whitespace and disallows control characters; returns empty string if invalid.
+func sanitizeUserID(userID string) string {
+	trimmed := strings.TrimSpace(userID)
+	if trimmed == "" {
+		return ""
+	}
+	// Basic sanity checks: length and allowed characters (alphanumerics plus .-_@)
+	if len(trimmed) > 256 {
+		return ""
+	}
+	for _, r := range trimmed {
+		if r <= 31 || r == 127 { // control characters
+			return ""
+		}
+		if !(r == '.' || r == '-' || r == '_' || r == '@' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')) {
+			return ""
+		}
+	}
+	return trimmed
 }
 
 // ResolvePronouns resolves pronouns and references in a query using conversation context.

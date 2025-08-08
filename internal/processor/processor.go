@@ -184,11 +184,19 @@ func (p *GenAIProcessor) ProcessQuery(ctx context.Context, req *types.Processing
 		return p.createErrorResponse("validation_failed", err), nil
 	}
 
-	// Step 7: Update context with new query/response
-	if err := p.contextManager.UpdateContext(req.SessionID, req.Query, structuredQuery); err != nil {
-		p.logger.Printf("Context update failed: %v", err)
-		// Don't fail the entire request for context update issues
+	// Step 7: Update context with new query/response, including user identity if available
+	if userID, ok := ctx.Value(types.ContextKeyUserID).(string); ok && userID != "" {
+		_ = p.contextManager.UpdateContextWithUser(req.SessionID, userID, req.Query, structuredQuery)
+	} else {
+		if convContext != nil && convContext.UserID != "" {
+			_ = p.contextManager.UpdateContextWithUser(req.SessionID, convContext.UserID, req.Query, structuredQuery)
+		} else {
+			if err := p.contextManager.UpdateContext(req.SessionID, req.Query, structuredQuery); err != nil {
+				p.logger.Printf("Context update failed: %v", err)
+			}
+		}
 	}
+	// Don't fail the entire request for context update issues
 
 	// Step 8: Create response
 	processingTime := time.Since(startTime)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"genai-processing/internal/processor"
@@ -52,6 +53,13 @@ func QueryHandler(genaiProcessor *processor.GenAIProcessor) http.HandlerFunc {
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancel()
 
+		// Extract user ID from Authorization header (e.g., "Bearer <token>")
+		if authHeader := r.Header.Get("Authorization"); authHeader != "" {
+			if userID := extractUserIDFromAuthHeader(authHeader); userID != "" {
+				ctx = context.WithValue(ctx, types.ContextKeyUserID, userID)
+			}
+		}
+
 		// Process the query using GenAIProcessor
 		response, err := genaiProcessor.ProcessQuery(ctx, &req)
 		if err != nil {
@@ -82,6 +90,22 @@ func QueryHandler(genaiProcessor *processor.GenAIProcessor) http.HandlerFunc {
 		// Log response details
 		log.Printf("[QueryHandler] Response sent successfully, confidence: %.2f", response.Confidence)
 	}
+}
+
+// extractUserIDFromAuthHeader is a placeholder for extracting user identity from Authorization header.
+// In production, replace with proper JWT parsing and validation. For now, supports a simple scheme:
+// Authorization: Bearer user:<user-id>
+func extractUserIDFromAuthHeader(header string) string {
+	parts := strings.SplitN(header, " ", 2)
+	if len(parts) != 2 {
+		return ""
+	}
+	token := strings.TrimSpace(parts[1])
+	// Very basic demo format: user:<id>
+	if strings.HasPrefix(token, "user:") {
+		return strings.TrimSpace(strings.TrimPrefix(token, "user:"))
+	}
+	return ""
 }
 
 // HealthHandler handles GET /health requests for health checks

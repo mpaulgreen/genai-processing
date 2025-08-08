@@ -41,6 +41,21 @@ func (m *mockContextManager) UpdateContext(sessionID string, query string, respo
 	return nil
 }
 
+func (m *mockContextManager) UpdateContextWithUser(sessionID string, userID string, query string, response *types.StructuredQuery) error {
+	if m.sessions[sessionID] == nil {
+		m.sessions[sessionID] = &types.ConversationContext{
+			SessionID:    sessionID,
+			UserID:       userID,
+			CreatedAt:    time.Now(),
+			LastActivity: time.Now(),
+		}
+	} else {
+		m.sessions[sessionID].UserID = userID
+		m.sessions[sessionID].LastActivity = time.Now()
+	}
+	return nil
+}
+
 func (m *mockContextManager) ResolvePronouns(query string, sessionID string) (string, error) {
 	if err, exists := m.errors[query]; exists {
 		return query, err

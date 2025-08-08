@@ -613,6 +613,87 @@ func TestGetSessionCount(t *testing.T) {
 	}
 }
 
+func TestUpdateContextWithUser_NewAndExisting(t *testing.T) {
+	cm := NewContextManager()
+	sessionID := "sess-user-1"
+	userID := "john.doe"
+
+	// New session with user
+	err := cm.UpdateContextWithUser(sessionID, userID, "q1", &types.StructuredQuery{LogSource: "kube-apiserver"})
+	if err != nil {
+		t.Fatalf("UpdateContextWithUser(new) failed: %v", err)
+	}
+	ctx, err := cm.GetContext(sessionID)
+	if err != nil {
+		t.Fatalf("GetContext failed: %v", err)
+	}
+	if ctx.UserID != userID {
+		t.Fatalf("expected UserID %q, got %q", userID, ctx.UserID)
+	}
+
+	// Existing session update with new user
+	newUser := "team_user-01"
+	err = cm.UpdateContextWithUser(sessionID, newUser, "q2", &types.StructuredQuery{LogSource: "kube-apiserver"})
+	if err != nil {
+		t.Fatalf("UpdateContextWithUser(existing) failed: %v", err)
+	}
+	ctx, _ = cm.GetContext(sessionID)
+	if ctx.UserID != newUser {
+		t.Fatalf("expected updated UserID %q, got %q", newUser, ctx.UserID)
+	}
+}
+
+func TestUpdateContextWithUser_Sanitization(t *testing.T) {
+	cm := NewContextManager()
+	// Oversized user ID (257 'a's)
+	longID := make([]byte, 257)
+	for i := range longID {
+		longID[i] = 'a'
+	}
+	// Control characters
+	ctrlID := "john\x00doe"
+	// Disallowed characters
+	badChars := "john doe!"
+
+	// Start with a valid set to create the session
+	sessionID := "sess-user-2"
+	if err := cm.UpdateContextWithUser(sessionID, "user@corp", "q", &types.StructuredQuery{LogSource: "kube-apiserver"}); err != nil {
+		t.Fatalf("failed to create session with valid user: %v", err)
+	}
+
+	// Attempt to set invalid long ID → should be rejected and keep previous user
+	_ = cm.UpdateContextWithUser(sessionID, string(longID), "q2", &types.StructuredQuery{LogSource: "kube-apiserver"})
+	ctx, _ := cm.GetContext(sessionID)
+	if ctx.UserID != "user@corp" {
+		t.Fatalf("expected UserID to remain 'user@corp', got %q", ctx.UserID)
+	}
+
+	// Control char ID rejected
+	_ = cm.UpdateContextWithUser(sessionID, ctrlID, "q3", &types.StructuredQuery{LogSource: "kube-apiserver"})
+	ctx, _ = cm.GetContext(sessionID)
+	if ctx.UserID != "user@corp" {
+		t.Fatalf("expected UserID to remain 'user@corp' after ctrlID, got %q", ctx.UserID)
+	}
+
+	// Disallowed chars rejected
+	_ = cm.UpdateContextWithUser(sessionID, badChars, "q4", &types.StructuredQuery{LogSource: "kube-apiserver"})
+	ctx, _ = cm.GetContext(sessionID)
+	if ctx.UserID != "user@corp" {
+		t.Fatalf("expected UserID to remain 'user@corp' after bad chars, got %q", ctx.UserID)
+	}
+
+	// Accept typical IDs
+	for _, good := range []string{"john.doe", "team_user-01", "user@corp"} {
+		if err := cm.UpdateContextWithUser(sessionID, good, "q5", &types.StructuredQuery{LogSource: "kube-apiserver"}); err != nil {
+			t.Fatalf("UpdateContextWithUser(valid %q) failed: %v", good, err)
+		}
+		ctx, _ = cm.GetContext(sessionID)
+		if ctx.UserID != good {
+			t.Fatalf("expected UserID %q, got %q", good, ctx.UserID)
+		}
+	}
+}
+
 func TestClearAllSessions(t *testing.T) {
 	cm := NewContextManager()
 	contextManager := cm.(*ContextManager) // Cast to concrete type for helper methods
