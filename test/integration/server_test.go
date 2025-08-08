@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"genai-processing/internal/parser/recovery"
 	"genai-processing/internal/processor"
 	"genai-processing/pkg/interfaces"
 	"genai-processing/pkg/types"
@@ -194,19 +195,33 @@ func createMockProcessor(shouldFail bool, responses map[string]*types.RawRespons
 	}
 
 	mockContext := &MockContextManager{}
+	mockValidator := &MockSafetyValidator{
+		shouldFail: shouldFail,
+	}
+
+	// Create mock RetryParser
+	retryConfig := &recovery.RetryConfig{
+		MaxRetries:          1,
+		RetryDelay:          time.Millisecond * 10,
+		ConfidenceThreshold: 0.95,
+		EnableReprompting:   false,
+	}
+
+	mockRetryParser := recovery.NewRetryParser(retryConfig, nil, nil)
+
+	// Register the mock parser
 	mockParser := &MockParser{
 		shouldFail: shouldFail,
 		confidence: 0.95,
 	}
-	mockValidator := &MockSafetyValidator{
-		shouldFail: shouldFail,
-	}
+	mockRetryParser.RegisterParser(recovery.StrategySpecific, mockParser)
+	mockRetryParser.RegisterParser(recovery.StrategyGeneric, mockParser)
 
 	// Create processor with injected mock dependencies
 	return processor.NewGenAIProcessorWithDeps(
 		mockContext,
 		mockLLM,
-		mockParser,
+		mockRetryParser,
 		mockValidator,
 	)
 }

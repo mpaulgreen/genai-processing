@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"genai-processing/internal/parser/recovery"
 	"genai-processing/pkg/interfaces"
 	"genai-processing/pkg/types"
 )
@@ -108,18 +109,36 @@ func (m *mockLLMEngine) ValidateConnection() error {
 }
 
 // mockParser implements interfaces.Parser for testing
-type mockParser struct {
-	queries    map[string]*types.StructuredQuery
-	errors     map[string]error
-	confidence float64
-}
+func newMockRetryParser() *recovery.RetryParser {
+	// Create a real RetryParser with mock configuration
+	retryConfig := &recovery.RetryConfig{
+		MaxRetries:          3,
+		RetryDelay:          time.Millisecond * 10,
+		ConfidenceThreshold: 0.95,
+		EnableReprompting:   false, // Disable for testing
+	}
 
-func newMockParser() *mockParser {
-	return &mockParser{
+	// Create RetryParser with nil dependencies for testing
+	retryParser := recovery.NewRetryParser(retryConfig, nil, nil)
+
+	// Register a mock parser that always succeeds
+	mockParser := &mockParser{
 		queries:    make(map[string]*types.StructuredQuery),
 		errors:     make(map[string]error),
 		confidence: 0.95,
 	}
+
+	retryParser.RegisterParser(recovery.StrategySpecific, mockParser)
+	retryParser.RegisterParser(recovery.StrategyGeneric, mockParser)
+
+	return retryParser
+}
+
+// mockParser implements interfaces.Parser for testing
+type mockParser struct {
+	queries    map[string]*types.StructuredQuery
+	errors     map[string]error
+	confidence float64
 }
 
 func (m *mockParser) ParseResponse(raw *types.RawResponse, modelType string) (*types.StructuredQuery, error) {
@@ -198,8 +217,8 @@ func TestNewGenAIProcessor(t *testing.T) {
 		t.Error("llmEngine should not be nil")
 	}
 
-	if processor.parser == nil {
-		t.Error("parser should not be nil")
+	if processor.RetryParser == nil {
+		t.Error("RetryParser should not be nil")
 	}
 
 	if processor.safetyValidator == nil {
@@ -220,7 +239,7 @@ func TestProcessQuery_Success(t *testing.T) {
 	processor := &GenAIProcessor{
 		contextManager:  newMockContextManager(),
 		llmEngine:       newMockLLMEngine(),
-		parser:          newMockParser(),
+		RetryParser:     newMockRetryParser(),
 		safetyValidator: newMockSafetyValidator(),
 		defaultModel:    "claude-3-5-sonnet-20241022",
 		logger:          log.New(log.Writer(), "[TestProcessor] ", log.LstdFlags),
@@ -268,7 +287,7 @@ func TestProcessQuery_ContextResolutionFailure(t *testing.T) {
 	processor := &GenAIProcessor{
 		contextManager:  mockContext,
 		llmEngine:       newMockLLMEngine(),
-		parser:          newMockParser(),
+		RetryParser:     newMockRetryParser(),
 		safetyValidator: newMockSafetyValidator(),
 		defaultModel:    "claude-3-5-sonnet-20241022",
 		logger:          log.New(log.Writer(), "[TestProcessor] ", log.LstdFlags),
@@ -308,7 +327,7 @@ func TestProcessQuery_LLMProcessingFailure(t *testing.T) {
 	processor := &GenAIProcessor{
 		contextManager:  newMockContextManager(),
 		llmEngine:       mockLLM,
-		parser:          newMockParser(),
+		RetryParser:     newMockRetryParser(),
 		safetyValidator: newMockSafetyValidator(),
 		defaultModel:    "claude-3-5-sonnet-20241022",
 		logger:          log.New(log.Writer(), "[TestProcessor] ", log.LstdFlags),
@@ -340,15 +359,27 @@ func TestProcessQuery_LLMProcessingFailure(t *testing.T) {
 }
 
 func TestProcessQuery_ParsingFailure(t *testing.T) {
-	mockParser := newMockParser()
-	mockParser.errors = map[string]error{
+	// Create a RetryParser with a mock parser that always fails
+	retryConfig := &recovery.RetryConfig{
+		MaxRetries:          1,
+		RetryDelay:          time.Millisecond * 10,
+		ConfidenceThreshold: 0.95,
+		EnableReprompting:   false,
+	}
+
+	failingParser := &mockParser{errors: make(map[string]error)}
+	failingParser.errors = map[string]error{
 		`{"log_source": "kube-apiserver", "verb": "get", "resource": "pods", "limit": 20}`: fmt.Errorf("parsing failed"),
 	}
+
+	retryParser := recovery.NewRetryParser(retryConfig, nil, nil)
+	retryParser.RegisterParser(recovery.StrategySpecific, failingParser)
+	retryParser.RegisterParser(recovery.StrategyGeneric, failingParser)
 
 	processor := &GenAIProcessor{
 		contextManager:  newMockContextManager(),
 		llmEngine:       newMockLLMEngine(),
-		parser:          mockParser,
+		RetryParser:     retryParser,
 		safetyValidator: newMockSafetyValidator(),
 		defaultModel:    "claude-3-5-sonnet-20241022",
 		logger:          log.New(log.Writer(), "[TestProcessor] ", log.LstdFlags),
@@ -388,7 +419,7 @@ func TestProcessQuery_ValidationFailure(t *testing.T) {
 	processor := &GenAIProcessor{
 		contextManager:  newMockContextManager(),
 		llmEngine:       newMockLLMEngine(),
-		parser:          newMockParser(),
+		RetryParser:     newMockRetryParser(),
 		safetyValidator: mockValidator,
 		defaultModel:    "claude-3-5-sonnet-20241022",
 		logger:          log.New(log.Writer(), "[TestProcessor] ", log.LstdFlags),
@@ -428,7 +459,7 @@ func TestProcessQuery_WithPronounResolution(t *testing.T) {
 	processor := &GenAIProcessor{
 		contextManager:  mockContext,
 		llmEngine:       newMockLLMEngine(),
-		parser:          newMockParser(),
+		RetryParser:     newMockRetryParser(),
 		safetyValidator: newMockSafetyValidator(),
 		defaultModel:    "claude-3-5-sonnet-20241022",
 		logger:          log.New(log.Writer(), "[TestProcessor] ", log.LstdFlags),
@@ -460,7 +491,15 @@ func TestProcessQuery_WithPronounResolution(t *testing.T) {
 }
 
 func TestProcessQuery_WithCustomStructuredQuery(t *testing.T) {
-	mockParser := newMockParser()
+	// Create a RetryParser with a mock parser that returns custom queries
+	retryConfig := &recovery.RetryConfig{
+		MaxRetries:          1,
+		RetryDelay:          time.Millisecond * 10,
+		ConfidenceThreshold: 0.95,
+		EnableReprompting:   false,
+	}
+
+	customParser := &mockParser{queries: make(map[string]*types.StructuredQuery)}
 	customQuery := &types.StructuredQuery{
 		LogSource: "oauth-server",
 		Verb:      *types.NewStringOrArray("get"),
@@ -468,14 +507,18 @@ func TestProcessQuery_WithCustomStructuredQuery(t *testing.T) {
 		Timeframe: "1_hour_ago",
 		Limit:     50,
 	}
-	mockParser.queries = map[string]*types.StructuredQuery{
+	customParser.queries = map[string]*types.StructuredQuery{
 		`{"log_source": "kube-apiserver", "verb": "get", "resource": "pods", "limit": 20}`: customQuery,
 	}
+
+	retryParser := recovery.NewRetryParser(retryConfig, nil, nil)
+	retryParser.RegisterParser(recovery.StrategySpecific, customParser)
+	retryParser.RegisterParser(recovery.StrategyGeneric, customParser)
 
 	processor := &GenAIProcessor{
 		contextManager:  newMockContextManager(),
 		llmEngine:       newMockLLMEngine(),
-		parser:          mockParser,
+		RetryParser:     retryParser,
 		safetyValidator: newMockSafetyValidator(),
 		defaultModel:    "claude-3-5-sonnet-20241022",
 		logger:          log.New(log.Writer(), "[TestProcessor] ", log.LstdFlags),
@@ -537,7 +580,7 @@ func TestProcessQuery_WithCustomValidationResult(t *testing.T) {
 	processor := &GenAIProcessor{
 		contextManager:  newMockContextManager(),
 		llmEngine:       newMockLLMEngine(),
-		parser:          newMockParser(),
+		RetryParser:     newMockRetryParser(),
 		safetyValidator: mockValidator,
 		defaultModel:    "claude-3-5-sonnet-20241022",
 		logger:          log.New(log.Writer(), "[TestProcessor] ", log.LstdFlags),

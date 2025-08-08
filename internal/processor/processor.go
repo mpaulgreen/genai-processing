@@ -9,6 +9,7 @@ import (
 	contextpkg "genai-processing/internal/context"
 	"genai-processing/internal/engine/providers"
 	"genai-processing/internal/parser/extractors"
+	"genai-processing/internal/parser/recovery"
 	"genai-processing/internal/validator"
 	"genai-processing/pkg/interfaces"
 	"genai-processing/pkg/types"
@@ -21,7 +22,7 @@ type GenAIProcessor struct {
 	// Dependencies
 	contextManager  interfaces.ContextManager
 	llmEngine       interfaces.LLMEngine
-	parser          interfaces.Parser
+	RetryParser     *recovery.RetryParser
 	safetyValidator interfaces.SafetyValidator
 
 	// Configuration
@@ -34,13 +35,13 @@ type GenAIProcessor struct {
 func NewGenAIProcessorWithDeps(
 	contextManager interfaces.ContextManager,
 	llmEngine interfaces.LLMEngine,
-	parser interfaces.Parser,
+	retryParser *recovery.RetryParser,
 	safetyValidator interfaces.SafetyValidator,
 ) *GenAIProcessor {
 	return &GenAIProcessor{
 		contextManager:  contextManager,
 		llmEngine:       llmEngine,
-		parser:          parser,
+		RetryParser:     retryParser,
 		safetyValidator: safetyValidator,
 		defaultModel:    "claude-3-5-sonnet-20241022",
 		logger:          log.New(log.Writer(), "[GenAIProcessor] ", log.LstdFlags),
@@ -55,17 +56,33 @@ func NewGenAIProcessor() *GenAIProcessor {
 
 	// Create Claude provider as the default LLM engine
 	claudeProvider := providers.NewClaudeProvider("", "") // API key will be set via config
+	llmEngine := createLLMEngine(claudeProvider)
 
-	// Create parser with Claude extractor
-	parser := extractors.NewClaudeExtractor()
+	// Create and configure RetryParser with multiple parsing strategies
+	retryConfig := &recovery.RetryConfig{
+		MaxRetries:          3,
+		RetryDelay:          time.Second * 2,
+		ConfidenceThreshold: 0.7,
+		EnableReprompting:   true,
+		RepromptTemplate:    "The previous response was not in the expected JSON format. Please provide a valid JSON response for the following query: %s",
+	}
+
+	retryParser := recovery.NewRetryParser(retryConfig, llmEngine, contextManager)
+
+	// Register parsers for different strategies
+	claudeExtractor := extractors.NewClaudeExtractor()
+	openaiExtractor := extractors.NewOpenAIExtractor()
+
+	retryParser.RegisterParser(recovery.StrategySpecific, claudeExtractor)
+	retryParser.RegisterParser(recovery.StrategyGeneric, openaiExtractor)
 
 	// Create safety validator
 	safetyValidator := validator.NewSafetyValidator()
 
 	return NewGenAIProcessorWithDeps(
 		contextManager,
-		createLLMEngine(claudeProvider),
-		parser,
+		llmEngine,
+		retryParser,
 		safetyValidator,
 	)
 }
@@ -88,14 +105,7 @@ func (p *GenAIProcessor) ProcessQuery(ctx context.Context, req *types.Processing
 	}
 
 	// Step 2: Prepare internal request for LLM processing (for future use)
-	_ = &types.InternalRequest{
-		RequestID:         generateRequestID(),
-		ProcessingRequest: *req,
-		ProcessingOptions: map[string]interface{}{
-			"model_type":     p.defaultModel,
-			"resolved_query": resolvedQuery,
-		},
-	}
+	// TODO: Use InternalRequest when implementing input adaptation
 
 	// Step 3: Get conversation context for LLM
 	convContext, err := p.contextManager.GetContext(req.SessionID)
@@ -116,11 +126,11 @@ func (p *GenAIProcessor) ProcessQuery(ctx context.Context, req *types.Processing
 		return p.createErrorResponse("llm_processing_failed", err), nil
 	}
 
-	// Step 5: Response parsing
-	p.logger.Printf("Parsing LLM response")
-	structuredQuery, err := p.parser.ParseResponse(rawResponse, p.defaultModel)
+	// Step 5: Response parsing with retry mechanism
+	p.logger.Printf("Parsing LLM response with retry mechanism")
+	structuredQuery, err := p.RetryParser.ParseWithRetry(ctx, rawResponse, p.defaultModel, req.Query, req.SessionID)
 	if err != nil {
-		p.logger.Printf("Response parsing failed: %v", err)
+		p.logger.Printf("Response parsing failed after retries: %v", err)
 		return p.createErrorResponse("parsing_failed", err), nil
 	}
 
@@ -142,9 +152,17 @@ func (p *GenAIProcessor) ProcessQuery(ctx context.Context, req *types.Processing
 	processingTime := time.Since(startTime)
 	p.logger.Printf("Query processing completed in %v", processingTime)
 
+	// Get confidence from retry parser statistics or use default
+	confidence := 0.8 // Default confidence for successful parsing
+	if stats := p.RetryParser.GetRetryStatistics(); stats != nil {
+		if threshold, ok := stats["confidence_threshold"].(float64); ok {
+			confidence = threshold
+		}
+	}
+
 	response := &types.ProcessingResponse{
 		StructuredQuery: structuredQuery,
-		Confidence:      p.parser.GetConfidence(),
+		Confidence:      confidence,
 		ValidationInfo:  validationResult,
 	}
 
@@ -300,9 +318,4 @@ The JSON should follow this structure:
 Examples:
 - "Who deleted the customer CRD yesterday?" → {"log_source": "kube-apiserver", "verb": "delete", "resource": "customresourcedefinitions", "resource_name_pattern": "customer", "timeframe": "yesterday", "exclude_users": ["system:"], "limit": 20}
 - "Show me all failed authentication attempts in the last hour" → {"log_source": "oauth-server", "timeframe": "1_hour_ago", "auth_decision": "error", "limit": 20}`
-}
-
-// generateRequestID generates a unique request ID for tracking
-func generateRequestID() string {
-	return fmt.Sprintf("req_%d", time.Now().UnixNano())
 }
