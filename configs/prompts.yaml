@@ -1,7 +1,9 @@
 # Prompts configuration for GenAI Processing Layer
-# This file configures system prompts, examples, and model-specific formats
+# This file configures system prompts, examples, and model-specific formats for OpenShift audit queries
 
+# System prompts for different model types and contexts
 system_prompts:
+  # Base system prompt for all models
   base: |
     You are an OpenShift audit query specialist. Convert natural language 
     queries into structured JSON parameters for audit log analysis.
@@ -20,7 +22,13 @@ system_prompts:
     - exclude_users: User patterns to exclude (e.g., ["system:", "kube-"])
     - resource_name_pattern: Regex pattern for resource name matching
     - auth_decision: Authentication decision filter (allow, error, forbid)
+    - response_status: HTTP response status filter (200, 403, 500, etc.)
+    - source_ip: Source IP address filtering
+    - group_by: Fields to group results by
+    - sort_by: Sort field (timestamp, user, resource, count)
+    - sort_order: Sort direction (asc, desc)
 
+  # Claude-specific system prompt with XML formatting
   claude_specific: |
     <instructions>
     You are an OpenShift audit query specialist. Convert natural language queries 
@@ -28,16 +36,46 @@ system_prompts:
     
     Respond with a JSON object that matches the provided schema exactly.
     Do not include any markdown formatting, explanations, or additional text.
+    
+    Key OpenShift concepts to understand:
+    - CRD = CustomResourceDefinition
+    - SA = ServiceAccount
+    - PVC = PersistentVolumeClaim
+    - RBAC = Role-Based Access Control
+    - OAuth = OpenShift authentication system
+    
+    Common timeframes: today, yesterday, 1_hour_ago, 7_days_ago, last_week
+    Common log sources: kube-apiserver, oauth-server, openshift-apiserver
     </instructions>
 
+  # OpenAI-specific system prompt
   openai_specific: |
     You are an OpenShift audit query specialist. Your task is to convert natural 
     language queries into structured JSON parameters.
     
     Respond with valid JSON only - no markdown formatting or explanations.
     The JSON should contain the appropriate fields based on the query context.
+    
+    Understand OpenShift terminology:
+    - CRD = CustomResourceDefinition
+    - SA = ServiceAccount  
+    - PVC = PersistentVolumeClaim
+    - RBAC = Role-Based Access Control
+    - OAuth = OpenShift authentication system
 
+  # Generic system prompt for local models
+  generic_specific: |
+    You are an OpenShift audit query specialist. Convert natural language queries 
+    into structured JSON parameters for audit log analysis.
+    
+    Respond with valid JSON only. No markdown, no explanations.
+    
+    OpenShift terms: CRD=CustomResourceDefinition, SA=ServiceAccount, 
+    PVC=PersistentVolumeClaim, RBAC=Role-Based Access Control
+
+# Few-shot examples from the PRD design document
 examples:
+  # Basic query patterns
   - input: "Who deleted the customer CRD yesterday?"
     output: |
       {
@@ -96,7 +134,119 @@ examples:
         "limit": 20
       }
 
+  # Intermediate query patterns
+  - input: "Find all CustomResourceDefinition modifications this week"
+    output: |
+      {
+        "log_source": "kube-apiserver",
+        "verb": ["create", "update", "patch", "delete"],
+        "resource": "customresourcedefinitions",
+        "timeframe": "7_days_ago",
+        "limit": 20
+      }
+
+  - input: "Show me all ClusterRole changes by non-system users"
+    output: |
+      {
+        "log_source": "kube-apiserver",
+        "verb": ["create", "update", "patch", "delete"],
+        "resource": "clusterroles",
+        "exclude_users": ["system:", "kube-"],
+        "limit": 20
+      }
+
+  - input: "List all persistent volume claim deletions with user details"
+    output: |
+      {
+        "log_source": "kube-apiserver",
+        "verb": "delete",
+        "resource": "persistentvolumeclaims",
+        "limit": 20
+      }
+
+  - input: "Find all rolebinding modifications in security-related namespaces"
+    output: |
+      {
+        "log_source": "kube-apiserver",
+        "verb": ["create", "update", "patch", "delete"],
+        "resource": ["rolebindings", "clusterrolebindings"],
+        "namespace_pattern": "^(security|kube-system|openshift-.*|prod-.*)$",
+        "limit": 20
+      }
+
+  - input: "Show failed resource creation attempts in the last hour"
+    output: |
+      {
+        "log_source": "kube-apiserver",
+        "verb": "create",
+        "timeframe": "1_hour_ago",
+        "response_status": ">=400",
+        "limit": 20
+      }
+
+  # Advanced query patterns
+  - input: "Find potential privilege escalation attempts with failed permissions"
+    output: |
+      {
+        "log_source": "kube-apiserver",
+        "response_status": "403",
+        "resource_pattern": "role|binding",
+        "exclude_users": ["system:"],
+        "limit": 20
+      }
+
+  - input: "Show unusual API access patterns outside business hours"
+    output: |
+      {
+        "log_source": "kube-apiserver",
+        "business_hours": {
+          "outside_only": true,
+          "start_hour": 9,
+          "end_hour": 17
+        },
+        "exclude_users": ["system:"],
+        "limit": 20
+      }
+
+  - input: "Find service accounts being used from unexpected source IPs"
+    output: |
+      {
+        "log_source": "kube-apiserver",
+        "user_pattern": "system:serviceaccount:",
+        "group_by": ["username", "source_ip"],
+        "sort_by": "count",
+        "sort_order": "desc",
+        "limit": 20
+      }
+
+  - input: "Identify rapid successive resource deletions by single user"
+    output: |
+      {
+        "log_source": "kube-apiserver",
+        "verb": "delete",
+        "timeframe": "1_hour_ago",
+        "group_by": "username",
+        "sort_by": "timestamp",
+        "limit": 100
+      }
+
+  - input: "Find users accessing multiple sensitive namespaces within short timeframes"
+    output: |
+      {
+        "log_source": "kube-apiserver",
+        "namespace_pattern": "^(kube-system|openshift-.*|security|prod.*)$",
+        "analysis": {
+          "type": "multi_namespace_access",
+          "group_by": "username",
+          "threshold": 3,
+          "time_window": "short"
+        },
+        "limit": 20
+      }
+
+# Model-specific prompt formatting
 formats:
+  # Claude format with XML-style instructions
   claude:
     template: |
       <instructions>
@@ -113,6 +263,7 @@ formats:
       
       JSON Response:
 
+  # OpenAI format with system/user messages
   openai:
     template: |
       System: {system_prompt}
@@ -124,6 +275,7 @@ formats:
     system_message: "{system_prompt}\n\nExamples:\n{examples}"
     user_message: "Convert this query to JSON: {query}"
 
+  # Generic format for local models
   generic:
     template: |
       {system_prompt}
@@ -135,13 +287,100 @@ formats:
       
       JSON Response:
 
+# Validation and safety rules
 validation:
+  # Input/output length limits
   max_input_length: 1000
   max_output_length: 2000
+  
+  # Required fields for valid audit queries
   required_fields: ["log_source"]
+  
+  # Forbidden words and patterns
   forbidden_words: 
     - "rm -rf"
     - "delete --all"
     - "system:admin"
     - "drop database"
     - "format c:"
+    - "shutdown"
+    - "reboot"
+    - "kill"
+    - "terminate"
+  
+  # Timeframe validation
+  valid_timeframes:
+    - "today"
+    - "yesterday"
+    - "1_hour_ago"
+    - "2_hours_ago"
+    - "6_hours_ago"
+    - "12_hours_ago"
+    - "1_day_ago"
+    - "2_days_ago"
+    - "7_days_ago"
+    - "last_week"
+    - "this_week"
+    - "last_month"
+  
+  # Valid log sources
+  valid_log_sources:
+    - "kube-apiserver"
+    - "openshift-apiserver"
+    - "oauth-server"
+    - "oauth-apiserver"
+  
+  # Valid HTTP verbs
+  valid_verbs:
+    - "get"
+    - "list"
+    - "create"
+    - "update"
+    - "patch"
+    - "delete"
+  
+  # Valid response status codes
+  valid_response_status:
+    - "200"
+    - "201"
+    - "400"
+    - "401"
+    - "403"
+    - "404"
+    - "500"
+    - ">=400"
+    - ">=500"
+
+# Intent classification patterns for better query understanding
+intent_patterns:
+  investigation:
+    - "who"
+    - "find"
+    - "show me"
+    - "list"
+    - "identify"
+    - "detect"
+  
+  troubleshooting:
+    - "why"
+    - "failed"
+    - "error"
+    - "denied"
+    - "permission"
+    - "access"
+  
+  monitoring:
+    - "all"
+    - "daily"
+    - "weekly"
+    - "regular"
+    - "pattern"
+    - "trend"
+  
+  security:
+    - "suspicious"
+    - "unusual"
+    - "anomaly"
+    - "threat"
+    - "escalation"
+    - "breach"
