@@ -39,6 +39,20 @@ func TestProviderFactory_RegisterProvider(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:         "valid openai provider",
+			providerType: "openai",
+			config: &ProviderConfig{
+				APIKey:    "test-key",
+				Endpoint:  "https://api.openai.com/v1/chat/completions",
+				ModelName: "gpt-4",
+				Parameters: map[string]interface{}{
+					"max_tokens":  4000,
+					"temperature": 0.1,
+				},
+			},
+			wantErr: false,
+		},
+		{
 			name:         "empty provider type",
 			providerType: "",
 			config: &ProviderConfig{
@@ -97,6 +111,21 @@ func TestProviderFactory_CreateProvider(t *testing.T) {
 		t.Fatalf("Failed to register claude provider: %v", err)
 	}
 
+	// Register an openai provider
+	openaiConfig := &ProviderConfig{
+		APIKey:    "test-key",
+		Endpoint:  "https://api.openai.com/v1/chat/completions",
+		ModelName: "gpt-4",
+		Parameters: map[string]interface{}{
+			"max_tokens":  4000,
+			"temperature": 0.1,
+		},
+	}
+	err = factory.RegisterProvider("openai", openaiConfig)
+	if err != nil {
+		t.Fatalf("Failed to register openai provider: %v", err)
+	}
+
 	tests := []struct {
 		name      string
 		modelType string
@@ -105,6 +134,11 @@ func TestProviderFactory_CreateProvider(t *testing.T) {
 		{
 			name:      "supported claude provider",
 			modelType: "claude",
+			wantErr:   false,
+		},
+		{
+			name:      "supported openai provider",
+			modelType: "openai",
 			wantErr:   false,
 		},
 		{
@@ -119,7 +153,7 @@ func TestProviderFactory_CreateProvider(t *testing.T) {
 		},
 		{
 			name:      "unregistered provider",
-			modelType: "openai",
+			modelType: "ollama",
 			wantErr:   true,
 		},
 	}
@@ -144,8 +178,26 @@ func TestProviderFactory_CreateProvider(t *testing.T) {
 				}
 
 				// Verify it's the correct type
-				if _, ok := provider.(*ClaudeProvider); !ok {
-					t.Error("CreateProvider() returned wrong provider type")
+				switch tt.modelType {
+				case "claude":
+					if _, ok := provider.(*ClaudeProvider); !ok {
+						t.Error("CreateProvider() returned wrong provider type for claude")
+					}
+				case "openai":
+					if _, ok := provider.(*OpenAIProvider); !ok {
+						t.Error("CreateProvider() returned wrong provider type for openai")
+					}
+					// Verify OpenAI provider has correct configuration
+					openaiProvider := provider.(*OpenAIProvider)
+					if openaiProvider.ModelName != "gpt-4" {
+						t.Errorf("OpenAI provider ModelName = %s, want gpt-4", openaiProvider.ModelName)
+					}
+					if openaiProvider.Parameters == nil {
+						t.Error("OpenAI provider Parameters is nil")
+					}
+					if maxTokens, ok := openaiProvider.Parameters["max_tokens"].(int); !ok || maxTokens != 4000 {
+						t.Errorf("OpenAI provider max_tokens = %v, want 4000", maxTokens)
+					}
 				}
 			}
 		})
@@ -180,6 +232,42 @@ func TestProviderFactory_GetSupportedProviders(t *testing.T) {
 	if supported[0] != "claude" {
 		t.Errorf("GetSupportedProviders() expected 'claude', got '%s'", supported[0])
 	}
+
+	// Register an openai provider
+	openaiConfig := &ProviderConfig{
+		APIKey:    "test-key",
+		Endpoint:  "https://api.openai.com/v1/chat/completions",
+		ModelName: "gpt-4",
+	}
+	err = factory.RegisterProvider("openai", openaiConfig)
+	if err != nil {
+		t.Fatalf("Failed to register openai provider: %v", err)
+	}
+
+	// Now both should be supported
+	supported = factory.GetSupportedProviders()
+	if len(supported) != 2 {
+		t.Errorf("GetSupportedProviders() expected 2 providers, got %d", len(supported))
+	}
+
+	// Check that both providers are in the list
+	hasClaude := false
+	hasOpenAI := false
+	for _, provider := range supported {
+		if provider == "claude" {
+			hasClaude = true
+		}
+		if provider == "openai" {
+			hasOpenAI = true
+		}
+	}
+
+	if !hasClaude {
+		t.Error("GetSupportedProviders() missing claude provider")
+	}
+	if !hasOpenAI {
+		t.Error("GetSupportedProviders() missing openai provider")
+	}
 }
 
 func TestProviderFactory_GetProviderConfig(t *testing.T) {
@@ -195,19 +283,39 @@ func TestProviderFactory_GetProviderConfig(t *testing.T) {
 		t.Fatalf("Failed to register claude provider: %v", err)
 	}
 
+	// Register an openai provider
+	openaiConfig := &ProviderConfig{
+		APIKey:    "test-key",
+		Endpoint:  "https://api.openai.com/v1/chat/completions",
+		ModelName: "gpt-4",
+		Parameters: map[string]interface{}{
+			"max_tokens":  4000,
+			"temperature": 0.1,
+		},
+	}
+	err = factory.RegisterProvider("openai", openaiConfig)
+	if err != nil {
+		t.Fatalf("Failed to register openai provider: %v", err)
+	}
+
 	tests := []struct {
 		name         string
 		providerType string
 		wantErr      bool
 	}{
 		{
-			name:         "existing provider",
+			name:         "existing claude provider",
 			providerType: "claude",
 			wantErr:      false,
 		},
 		{
-			name:         "non-existent provider",
+			name:         "existing openai provider",
 			providerType: "openai",
+			wantErr:      false,
+		},
+		{
+			name:         "non-existent provider",
+			providerType: "ollama",
 			wantErr:      true,
 		},
 		{
@@ -234,10 +342,24 @@ func TestProviderFactory_GetProviderConfig(t *testing.T) {
 				}
 				if config == nil {
 					t.Error("GetProviderConfig() expected config, got nil")
-				}
+				} else {
+					if config.APIKey != "test-key" {
+						t.Errorf("GetProviderConfig() expected API key 'test-key', got '%s'", config.APIKey)
+					}
 
-				if config.APIKey != "test-key" {
-					t.Errorf("GetProviderConfig() expected API key 'test-key', got '%s'", config.APIKey)
+					// Verify OpenAI-specific configuration
+					if tt.providerType == "openai" {
+						if config.ModelName != "gpt-4" {
+							t.Errorf("GetProviderConfig() expected model name 'gpt-4', got '%s'", config.ModelName)
+						}
+						if config.Parameters == nil {
+							t.Error("GetProviderConfig() expected parameters for openai")
+						} else {
+							if maxTokens, ok := config.Parameters["max_tokens"].(int); !ok || maxTokens != 4000 {
+								t.Errorf("GetProviderConfig() expected max_tokens 4000, got %v", maxTokens)
+							}
+						}
+					}
 				}
 			}
 		})
@@ -252,8 +374,14 @@ func TestProviderFactory_ValidateProvider(t *testing.T) {
 		wantErr      bool
 	}{
 		{
-			name:         "valid registered provider",
+			name:         "valid registered claude provider",
 			providerType: "claude",
+			register:     true,
+			wantErr:      false,
+		},
+		{
+			name:         "valid registered openai provider",
+			providerType: "openai",
 			register:     true,
 			wantErr:      false,
 		},
@@ -287,6 +415,10 @@ func TestProviderFactory_ValidateProvider(t *testing.T) {
 				config := &ProviderConfig{
 					APIKey:   "test-key",
 					Endpoint: "https://api.anthropic.com/v1/messages",
+				}
+				if tt.providerType == "openai" {
+					config.Endpoint = "https://api.openai.com/v1/chat/completions"
+					config.ModelName = "gpt-4"
 				}
 				err := factory.RegisterProvider(tt.providerType, config)
 				if err != nil {
@@ -324,6 +456,21 @@ func TestProviderFactory_CreateProviderWithConfig(t *testing.T) {
 			config: &ProviderConfig{
 				APIKey:   "test-key",
 				Endpoint: "https://api.anthropic.com/v1/messages",
+			},
+			wantErr: false,
+		},
+		{
+			name:         "valid openai provider with full config",
+			providerType: "openai",
+			config: &ProviderConfig{
+				APIKey:    "test-key",
+				Endpoint:  "https://api.openai.com/v1/chat/completions",
+				ModelName: "gpt-4",
+				Parameters: map[string]interface{}{
+					"max_tokens":  4000,
+					"temperature": 0.1,
+					"top_p":       1.0,
+				},
 			},
 			wantErr: false,
 		},
@@ -379,8 +526,29 @@ func TestProviderFactory_CreateProviderWithConfig(t *testing.T) {
 				}
 
 				// Verify it's the correct type
-				if _, ok := provider.(*ClaudeProvider); !ok {
-					t.Error("CreateProviderWithConfig() returned wrong provider type")
+				switch tt.providerType {
+				case "claude":
+					if _, ok := provider.(*ClaudeProvider); !ok {
+						t.Error("CreateProviderWithConfig() returned wrong provider type for claude")
+					}
+				case "openai":
+					if _, ok := provider.(*OpenAIProvider); !ok {
+						t.Error("CreateProviderWithConfig() returned wrong provider type for openai")
+					}
+					// Verify OpenAI provider has correct configuration
+					openaiProvider := provider.(*OpenAIProvider)
+					if openaiProvider.ModelName != "gpt-4" {
+						t.Errorf("OpenAI provider ModelName = %s, want gpt-4", openaiProvider.ModelName)
+					}
+					if openaiProvider.Parameters == nil {
+						t.Error("OpenAI provider Parameters is nil")
+					}
+					if maxTokens, ok := openaiProvider.Parameters["max_tokens"].(int); !ok || maxTokens != 4000 {
+						t.Errorf("OpenAI provider max_tokens = %v, want 4000", maxTokens)
+					}
+					if temp, ok := openaiProvider.Parameters["temperature"].(float64); !ok || temp != 0.1 {
+						t.Errorf("OpenAI provider temperature = %v, want 0.1", temp)
+					}
 				}
 			}
 		})
@@ -398,6 +566,11 @@ func TestProviderFactory_GetDefaultConfig(t *testing.T) {
 		{
 			name:         "claude provider",
 			providerType: "claude",
+			expectNil:    false,
+		},
+		{
+			name:         "openai provider",
+			providerType: "openai",
 			expectNil:    false,
 		},
 		{
@@ -449,6 +622,34 @@ func TestProviderFactory_GetDefaultConfig(t *testing.T) {
 						}
 					}
 				}
+
+				// Verify openai config
+				if tt.providerType == "openai" {
+					if config.APIKey != "" {
+						t.Error("GetDefaultConfig() expected empty API key for openai")
+					}
+					if config.Endpoint != "https://api.openai.com/v1/chat/completions" {
+						t.Errorf("GetDefaultConfig() expected endpoint 'https://api.openai.com/v1/chat/completions', got '%s'", config.Endpoint)
+					}
+					if config.ModelName != "gpt-4" {
+						t.Errorf("GetDefaultConfig() expected model name 'gpt-4', got '%s'", config.ModelName)
+					}
+
+					// Check parameters
+					if config.Parameters == nil {
+						t.Error("GetDefaultConfig() expected parameters map")
+					} else {
+						if maxTokens, ok := config.Parameters["max_tokens"].(int); !ok || maxTokens != 4000 {
+							t.Errorf("GetDefaultConfig() expected max_tokens 4000, got %v", maxTokens)
+						}
+						if temp, ok := config.Parameters["temperature"].(float64); !ok || temp != 0.1 {
+							t.Errorf("GetDefaultConfig() expected temperature 0.1, got %v", temp)
+						}
+						if topP, ok := config.Parameters["top_p"].(float64); !ok || topP != 1.0 {
+							t.Errorf("GetDefaultConfig() expected top_p 1.0, got %v", topP)
+						}
+					}
+				}
 			}
 		})
 	}
@@ -457,7 +658,7 @@ func TestProviderFactory_GetDefaultConfig(t *testing.T) {
 func TestProviderFactory_Integration(t *testing.T) {
 	factory := NewProviderFactory()
 
-	// Test complete workflow
+	// Test complete workflow for Claude
 	// 1. Get default config
 	config := factory.GetDefaultConfig("claude")
 	if config == nil {
@@ -508,5 +709,144 @@ func TestProviderFactory_Integration(t *testing.T) {
 
 	if provider.SupportsStreaming() {
 		t.Error("SupportsStreaming() should return false for current implementation")
+	}
+}
+
+func TestProviderFactory_OpenAI_Integration(t *testing.T) {
+	factory := NewProviderFactory()
+
+	// Test complete workflow for OpenAI
+	// 1. Get default config
+	config := factory.GetDefaultConfig("openai")
+	if config == nil {
+		t.Fatal("GetDefaultConfig() returned nil for openai")
+	}
+
+	// 2. Set API key
+	config.APIKey = "test-integration-key"
+
+	// 3. Register provider
+	err := factory.RegisterProvider("openai", config)
+	if err != nil {
+		t.Fatalf("RegisterProvider() failed: %v", err)
+	}
+
+	// 4. Validate provider
+	err = factory.ValidateProvider("openai")
+	if err != nil {
+		t.Fatalf("ValidateProvider() failed: %v", err)
+	}
+
+	// 5. Get supported providers
+	supported := factory.GetSupportedProviders()
+	if len(supported) != 1 || supported[0] != "openai" {
+		t.Errorf("GetSupportedProviders() expected ['openai'], got %v", supported)
+	}
+
+	// 6. Create provider
+	provider, err := factory.CreateProvider("openai")
+	if err != nil {
+		t.Fatalf("CreateProvider() failed: %v", err)
+	}
+
+	if provider == nil {
+		t.Fatal("CreateProvider() returned nil provider")
+	}
+
+	// 7. Verify provider type
+	if _, ok := provider.(*OpenAIProvider); !ok {
+		t.Error("CreateProvider() returned wrong provider type")
+	}
+
+	// 8. Test provider interface methods
+	modelInfo := provider.GetModelInfo()
+	if modelInfo.Name != "gpt-4" {
+		t.Errorf("GetModelInfo() expected name 'gpt-4', got '%s'", modelInfo.Name)
+	}
+
+	if provider.SupportsStreaming() {
+		t.Error("SupportsStreaming() should return false for current implementation")
+	}
+
+	// 9. Verify OpenAI provider has correct configuration
+	openaiProvider := provider.(*OpenAIProvider)
+	if openaiProvider.ModelName != "gpt-4" {
+		t.Errorf("OpenAI provider ModelName = %s, want gpt-4", openaiProvider.ModelName)
+	}
+	if openaiProvider.Parameters == nil {
+		t.Error("OpenAI provider Parameters is nil")
+	}
+	if maxTokens, ok := openaiProvider.Parameters["max_tokens"].(int); !ok || maxTokens != 4000 {
+		t.Errorf("OpenAI provider max_tokens = %v, want 4000", maxTokens)
+	}
+	if temp, ok := openaiProvider.Parameters["temperature"].(float64); !ok || temp != 0.1 {
+		t.Errorf("OpenAI provider temperature = %v, want 0.1", temp)
+	}
+}
+
+func TestProviderFactory_BackwardCompatibility(t *testing.T) {
+	factory := NewProviderFactory()
+
+	// Test that Claude support remains intact
+	claudeConfig := &ProviderConfig{
+		APIKey:   "test-key",
+		Endpoint: "https://api.anthropic.com/v1/messages",
+	}
+	err := factory.RegisterProvider("claude", claudeConfig)
+	if err != nil {
+		t.Fatalf("Failed to register claude provider: %v", err)
+	}
+
+	provider, err := factory.CreateProvider("claude")
+	if err != nil {
+		t.Fatalf("CreateProvider() failed for claude: %v", err)
+	}
+
+	if _, ok := provider.(*ClaudeProvider); !ok {
+		t.Error("CreateProvider() returned wrong provider type for claude")
+	}
+
+	// Test that both providers can coexist
+	openaiConfig := &ProviderConfig{
+		APIKey:    "test-key",
+		Endpoint:  "https://api.openai.com/v1/chat/completions",
+		ModelName: "gpt-4",
+	}
+	err = factory.RegisterProvider("openai", openaiConfig)
+	if err != nil {
+		t.Fatalf("Failed to register openai provider: %v", err)
+	}
+
+	openaiProvider, err := factory.CreateProvider("openai")
+	if err != nil {
+		t.Fatalf("CreateProvider() failed for openai: %v", err)
+	}
+
+	if _, ok := openaiProvider.(*OpenAIProvider); !ok {
+		t.Error("CreateProvider() returned wrong provider type for openai")
+	}
+
+	// Verify both are supported
+	supported := factory.GetSupportedProviders()
+	if len(supported) != 2 {
+		t.Errorf("GetSupportedProviders() expected 2 providers, got %d", len(supported))
+	}
+
+	hasClaude := false
+	hasOpenAI := false
+	for _, provider := range supported {
+		if provider == "claude" {
+			hasClaude = true
+		}
+		if provider == "openai" {
+			hasOpenAI = true
+		}
+	}
+
+	if !hasClaude {
+		t.Error("Backward compatibility: claude provider not supported")
+	}
+	if !hasOpenAI {
+		t.Error("Backward compatibility: openai provider not supported")
 	}
 }

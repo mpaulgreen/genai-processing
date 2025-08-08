@@ -53,12 +53,12 @@ func (f *ProviderFactory) CreateProvider(modelType string) (interfaces.LLMProvid
 		return nil, fmt.Errorf("unsupported provider type: %s", modelType)
 	}
 
-	// Create provider based on type
+	// Create provider based on type with full configuration
 	switch modelType {
 	case "claude":
 		return NewClaudeProvider(config.APIKey, config.Endpoint), nil
 	case "openai":
-		return NewOpenAIProvider(config.APIKey, config.Endpoint), nil
+		return NewOpenAIProviderWithConfig(config.APIKey, config.Endpoint, config.ModelName, config.Parameters), nil
 	default:
 		return nil, fmt.Errorf("unsupported provider type: %s", modelType)
 	}
@@ -67,12 +67,6 @@ func (f *ProviderFactory) CreateProvider(modelType string) (interfaces.LLMProvid
 // GetSupportedProviders returns a list of all supported provider types
 func (f *ProviderFactory) GetSupportedProviders() []string {
 	supported := []string{"claude", "openai"}
-
-	// Only include providers that have been registered
-	registered := make([]string, 0)
-	for providerType := range f.configs {
-		registered = append(registered, providerType)
-	}
 
 	// Return intersection of supported and registered providers
 	result := make([]string, 0)
@@ -139,12 +133,12 @@ func (f *ProviderFactory) CreateProviderWithConfig(providerType string, config *
 		return nil, fmt.Errorf("API key is required for provider %s", providerType)
 	}
 
-	// Create provider based on type
+	// Create provider based on type with full configuration
 	switch providerType {
 	case "claude":
 		return NewClaudeProvider(config.APIKey, config.Endpoint), nil
 	case "openai":
-		return NewOpenAIProvider(config.APIKey, config.Endpoint), nil
+		return NewOpenAIProviderWithConfig(config.APIKey, config.Endpoint, config.ModelName, config.Parameters), nil
 	default:
 		return nil, fmt.Errorf("unsupported provider type: %s", providerType)
 	}

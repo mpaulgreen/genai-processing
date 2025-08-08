@@ -14,9 +14,11 @@ import (
 
 // OpenAIProvider implements the LLMProvider interface for OpenAI's API
 type OpenAIProvider struct {
-	APIKey   string
-	Endpoint string
-	client   *http.Client
+	APIKey     string
+	Endpoint   string
+	ModelName  string
+	Parameters map[string]interface{}
+	client     *http.Client
 }
 
 // OpenAIMessage represents a message in the OpenAI API format
@@ -75,8 +77,33 @@ func NewOpenAIProvider(apiKey, endpoint string) *OpenAIProvider {
 	}
 
 	return &OpenAIProvider{
-		APIKey:   apiKey,
-		Endpoint: endpoint,
+		APIKey:     apiKey,
+		Endpoint:   endpoint,
+		ModelName:  "gpt-4", // Default model name
+		Parameters: make(map[string]interface{}),
+		client: &http.Client{
+			Timeout: 30 * time.Second,
+		},
+	}
+}
+
+// NewOpenAIProviderWithConfig creates a new OpenAIProvider instance with full configuration
+func NewOpenAIProviderWithConfig(apiKey, endpoint, modelName string, parameters map[string]interface{}) *OpenAIProvider {
+	if endpoint == "" {
+		endpoint = "https://api.openai.com/v1/chat/completions"
+	}
+	if modelName == "" {
+		modelName = "gpt-4"
+	}
+	if parameters == nil {
+		parameters = make(map[string]interface{})
+	}
+
+	return &OpenAIProvider{
+		APIKey:     apiKey,
+		Endpoint:   endpoint,
+		ModelName:  modelName,
+		Parameters: parameters,
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -90,16 +117,44 @@ func (o *OpenAIProvider) GenerateResponse(ctx context.Context, request *types.Mo
 		return nil, fmt.Errorf("openai API key is required")
 	}
 
-	// Convert ModelRequest to OpenAIRequest
+	// Use stored model name if not provided in request
+	modelName := request.Model
+	if modelName == "" {
+		modelName = o.ModelName
+	}
+
+	// Convert ModelRequest to OpenAIRequest with stored defaults
 	openaiReq := OpenAIRequest{
-		Model:       request.Model,
+		Model:       modelName,
 		MaxTokens:   4000, // Default max tokens
 		Temperature: 0.1,  // Default temperature
 		TopP:        1.0,  // Default top_p
 		Stream:      false,
 	}
 
-	// Extract parameters
+	// Apply stored configuration as defaults
+	if o.Parameters != nil {
+		if maxTokens, ok := o.Parameters["max_tokens"].(int); ok {
+			openaiReq.MaxTokens = maxTokens
+		}
+		if temp, ok := o.Parameters["temperature"].(float64); ok {
+			openaiReq.Temperature = temp
+		}
+		if topP, ok := o.Parameters["top_p"].(float64); ok {
+			openaiReq.TopP = topP
+		}
+		if freqPenalty, ok := o.Parameters["frequency_penalty"].(float64); ok {
+			openaiReq.FrequencyPenalty = freqPenalty
+		}
+		if presPenalty, ok := o.Parameters["presence_penalty"].(float64); ok {
+			openaiReq.PresencePenalty = presPenalty
+		}
+		if stream, ok := o.Parameters["stream"].(bool); ok {
+			openaiReq.Stream = stream
+		}
+	}
+
+	// Override with request-specific parameters
 	if request.Parameters != nil {
 		if maxTokens, ok := request.Parameters["max_tokens"].(int); ok {
 			openaiReq.MaxTokens = maxTokens
@@ -227,9 +282,9 @@ func (o *OpenAIProvider) GenerateResponse(ctx context.Context, request *types.Mo
 // GetModelInfo implements the LLMProvider interface
 func (o *OpenAIProvider) GetModelInfo() types.ModelInfo {
 	return types.ModelInfo{
-		Name:               "gpt-4",
+		Name:               o.ModelName,
 		Provider:           "openai",
-		Version:            "gpt-4",
+		Version:            o.ModelName,
 		Description:        "GPT-4 - Advanced language model for complex reasoning and analysis",
 		ModelType:          "chat",
 		ContextWindow:      8192,

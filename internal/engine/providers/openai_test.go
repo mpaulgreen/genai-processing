@@ -51,12 +51,419 @@ func TestNewOpenAIProvider(t *testing.T) {
 				}
 			}
 
+			// Verify new fields have default values
+			if provider.ModelName != "gpt-4" {
+				t.Errorf("NewOpenAIProvider() ModelName = %v, want %v", provider.ModelName, "gpt-4")
+			}
+
+			if provider.Parameters == nil {
+				t.Error("NewOpenAIProvider() Parameters is nil")
+			}
+
+			if len(provider.Parameters) != 0 {
+				t.Errorf("NewOpenAIProvider() Parameters should be empty, got %v", provider.Parameters)
+			}
+
 			if provider.client == nil {
 				t.Error("NewOpenAIProvider() client is nil")
 			}
 
 			if provider.client.Timeout != 30*time.Second {
 				t.Errorf("NewOpenAIProvider() client timeout = %v, want %v", provider.client.Timeout, 30*time.Second)
+			}
+		})
+	}
+}
+
+func TestNewOpenAIProviderWithConfig(t *testing.T) {
+	tests := []struct {
+		name       string
+		apiKey     string
+		endpoint   string
+		modelName  string
+		parameters map[string]interface{}
+		wantErr    bool
+	}{
+		{
+			name:      "valid provider with full config",
+			apiKey:    "test-key",
+			endpoint:  "https://custom.openai.com/v1/chat/completions",
+			modelName: "gpt-4-turbo",
+			parameters: map[string]interface{}{
+				"max_tokens":  2000,
+				"temperature": 0.2,
+				"top_p":       0.9,
+			},
+			wantErr: false,
+		},
+		{
+			name:      "valid provider with empty endpoint (should use default)",
+			apiKey:    "test-key",
+			endpoint:  "",
+			modelName: "gpt-3.5-turbo",
+			parameters: map[string]interface{}{
+				"max_tokens": 1000,
+			},
+			wantErr: false,
+		},
+		{
+			name:      "valid provider with empty model name (should use default)",
+			apiKey:    "test-key",
+			endpoint:  "https://api.openai.com/v1/chat/completions",
+			modelName: "",
+			parameters: map[string]interface{}{
+				"temperature": 0.5,
+			},
+			wantErr: false,
+		},
+		{
+			name:       "valid provider with nil parameters (should use empty map)",
+			apiKey:     "test-key",
+			endpoint:   "https://api.openai.com/v1/chat/completions",
+			modelName:  "gpt-4",
+			parameters: nil,
+			wantErr:    false,
+		},
+		{
+			name:       "valid provider with empty parameters map",
+			apiKey:     "test-key",
+			endpoint:   "https://api.openai.com/v1/chat/completions",
+			modelName:  "gpt-4",
+			parameters: map[string]interface{}{},
+			wantErr:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := NewOpenAIProviderWithConfig(tt.apiKey, tt.endpoint, tt.modelName, tt.parameters)
+
+			// Verify basic fields
+			if provider.APIKey != tt.apiKey {
+				t.Errorf("NewOpenAIProviderWithConfig() APIKey = %v, want %v", provider.APIKey, tt.apiKey)
+			}
+
+			// Verify endpoint
+			expectedEndpoint := tt.endpoint
+			if expectedEndpoint == "" {
+				expectedEndpoint = "https://api.openai.com/v1/chat/completions"
+			}
+			if provider.Endpoint != expectedEndpoint {
+				t.Errorf("NewOpenAIProviderWithConfig() Endpoint = %v, want %v", provider.Endpoint, expectedEndpoint)
+			}
+
+			// Verify model name
+			expectedModelName := tt.modelName
+			if expectedModelName == "" {
+				expectedModelName = "gpt-4"
+			}
+			if provider.ModelName != expectedModelName {
+				t.Errorf("NewOpenAIProviderWithConfig() ModelName = %v, want %v", provider.ModelName, expectedModelName)
+			}
+
+			// Verify parameters
+			if provider.Parameters == nil {
+				t.Error("NewOpenAIProviderWithConfig() Parameters is nil")
+			} else {
+				if tt.parameters == nil {
+					// If nil was passed, should be empty map
+					if len(provider.Parameters) != 0 {
+						t.Errorf("NewOpenAIProviderWithConfig() Parameters should be empty when nil passed, got %v", provider.Parameters)
+					}
+				} else {
+					// Verify all parameters are copied correctly
+					for key, expectedValue := range tt.parameters {
+						if actualValue, exists := provider.Parameters[key]; !exists {
+							t.Errorf("NewOpenAIProviderWithConfig() missing parameter %s", key)
+						} else if actualValue != expectedValue {
+							t.Errorf("NewOpenAIProviderWithConfig() parameter %s = %v, want %v", key, actualValue, expectedValue)
+						}
+					}
+					// Verify no extra parameters were added
+					if len(provider.Parameters) != len(tt.parameters) {
+						t.Errorf("NewOpenAIProviderWithConfig() Parameters count = %d, want %d", len(provider.Parameters), len(tt.parameters))
+					}
+				}
+			}
+
+			// Verify client
+			if provider.client == nil {
+				t.Error("NewOpenAIProviderWithConfig() client is nil")
+			}
+
+			if provider.client.Timeout != 30*time.Second {
+				t.Errorf("NewOpenAIProviderWithConfig() client timeout = %v, want %v", provider.client.Timeout, 30*time.Second)
+			}
+		})
+	}
+}
+
+func TestOpenAIProvider_GenerateResponse_WithStoredConfig(t *testing.T) {
+	// Test that stored configuration is used as defaults
+	provider := NewOpenAIProviderWithConfig(
+		"test-key",
+		"https://api.openai.com/v1/chat/completions",
+		"gpt-4-turbo",
+		map[string]interface{}{
+			"max_tokens":  1500,
+			"temperature": 0.3,
+			"top_p":       0.8,
+		},
+	)
+
+	// Create a request without specifying model or parameters
+	request := &types.ModelRequest{
+		Model: "", // Empty model should use stored model
+		Messages: []interface{}{
+			map[string]interface{}{
+				"role":    "user",
+				"content": "Hello, GPT!",
+			},
+		},
+		Parameters: nil, // No parameters should use stored parameters
+	}
+
+	// Mock server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Verify the request uses stored configuration
+		var reqBody OpenAIRequest
+		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+			t.Errorf("Failed to decode request body: %v", err)
+		}
+
+		// Verify model name
+		if reqBody.Model != "gpt-4-turbo" {
+			t.Errorf("Request model = %s, want gpt-4-turbo", reqBody.Model)
+		}
+
+		// Verify parameters
+		if reqBody.MaxTokens != 1500 {
+			t.Errorf("Request max_tokens = %d, want 1500", reqBody.MaxTokens)
+		}
+		if reqBody.Temperature != 0.3 {
+			t.Errorf("Request temperature = %f, want 0.3", reqBody.Temperature)
+		}
+		if reqBody.TopP != 0.8 {
+			t.Errorf("Request top_p = %f, want 0.8", reqBody.TopP)
+		}
+
+		// Return success response
+		response := OpenAIResponse{
+			ID:      "chatcmpl-123",
+			Object:  "chat.completion",
+			Created: 1677652288,
+			Model:   "gpt-4-turbo",
+			Choices: []struct {
+				Index   int `json:"index"`
+				Message struct {
+					Role    string `json:"role"`
+					Content string `json:"content"`
+				} `json:"message"`
+				FinishReason string `json:"finish_reason"`
+			}{
+				{
+					Index: 0,
+					Message: struct {
+						Role    string `json:"role"`
+						Content string `json:"content"`
+					}{
+						Role:    "assistant",
+						Content: "Hello! How can I help you today?",
+					},
+					FinishReason: "stop",
+				},
+			},
+			Usage: struct {
+				PromptTokens     int `json:"prompt_tokens"`
+				CompletionTokens int `json:"completion_tokens"`
+				TotalTokens      int `json:"total_tokens"`
+			}{
+				PromptTokens:     10,
+				CompletionTokens: 15,
+				TotalTokens:      25,
+			},
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	// Update provider to use test server
+	provider.Endpoint = server.URL
+
+	// Test the response
+	ctx := context.Background()
+	response, err := provider.GenerateResponse(ctx, request)
+
+	if err != nil {
+		t.Errorf("GenerateResponse() error = %v", err)
+	}
+
+	if response == nil {
+		t.Error("GenerateResponse() returned nil response")
+	} else if response.Content != "Hello! How can I help you today?" {
+		t.Errorf("GenerateResponse() content = %s, want 'Hello! How can I help you today?'", response.Content)
+	}
+}
+
+func TestOpenAIProvider_GenerateResponse_RequestOverridesStoredConfig(t *testing.T) {
+	// Test that request parameters override stored configuration
+	provider := NewOpenAIProviderWithConfig(
+		"test-key",
+		"https://api.openai.com/v1/chat/completions",
+		"gpt-4", // Stored model
+		map[string]interface{}{
+			"max_tokens":  1000, // Stored parameters
+			"temperature": 0.1,
+			"top_p":       1.0,
+		},
+	)
+
+	// Create a request that overrides stored configuration
+	request := &types.ModelRequest{
+		Model: "gpt-3.5-turbo", // Override stored model
+		Messages: []interface{}{
+			map[string]interface{}{
+				"role":    "user",
+				"content": "Hello, GPT!",
+			},
+		},
+		Parameters: map[string]interface{}{
+			"max_tokens":  500, // Override stored parameter
+			"temperature": 0.5, // Override stored parameter
+			"top_p":       0.9, // Override stored parameter
+		},
+	}
+
+	// Mock server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Verify the request uses request parameters (not stored ones)
+		var reqBody OpenAIRequest
+		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+			t.Errorf("Failed to decode request body: %v", err)
+		}
+
+		// Verify model name (should use request model, not stored)
+		if reqBody.Model != "gpt-3.5-turbo" {
+			t.Errorf("Request model = %s, want gpt-3.5-turbo", reqBody.Model)
+		}
+
+		// Verify parameters (should use request parameters, not stored)
+		if reqBody.MaxTokens != 500 {
+			t.Errorf("Request max_tokens = %d, want 500", reqBody.MaxTokens)
+		}
+		if reqBody.Temperature != 0.5 {
+			t.Errorf("Request temperature = %f, want 0.5", reqBody.Temperature)
+		}
+		if reqBody.TopP != 0.9 {
+			t.Errorf("Request top_p = %f, want 0.9", reqBody.TopP)
+		}
+
+		// Return success response
+		response := OpenAIResponse{
+			ID:      "chatcmpl-123",
+			Object:  "chat.completion",
+			Created: 1677652288,
+			Model:   "gpt-3.5-turbo",
+			Choices: []struct {
+				Index   int `json:"index"`
+				Message struct {
+					Role    string `json:"role"`
+					Content string `json:"content"`
+				} `json:"message"`
+				FinishReason string `json:"finish_reason"`
+			}{
+				{
+					Index: 0,
+					Message: struct {
+						Role    string `json:"role"`
+						Content string `json:"content"`
+					}{
+						Role:    "assistant",
+						Content: "Hello! I'm GPT-3.5-turbo.",
+					},
+					FinishReason: "stop",
+				},
+			},
+			Usage: struct {
+				PromptTokens     int `json:"prompt_tokens"`
+				CompletionTokens int `json:"completion_tokens"`
+				TotalTokens      int `json:"total_tokens"`
+			}{
+				PromptTokens:     10,
+				CompletionTokens: 15,
+				TotalTokens:      25,
+			},
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	// Update provider to use test server
+	provider.Endpoint = server.URL
+
+	// Test the response
+	ctx := context.Background()
+	response, err := provider.GenerateResponse(ctx, request)
+
+	if err != nil {
+		t.Errorf("GenerateResponse() error = %v", err)
+	}
+
+	if response == nil {
+		t.Error("GenerateResponse() returned nil response")
+	} else if response.Content != "Hello! I'm GPT-3.5-turbo." {
+		t.Errorf("GenerateResponse() content = %s, want 'Hello! I'm GPT-3.5-turbo.'", response.Content)
+	}
+}
+
+func TestOpenAIProvider_GetModelInfo_WithStoredModelName(t *testing.T) {
+	tests := []struct {
+		name      string
+		modelName string
+		wantName  string
+	}{
+		{
+			name:      "custom model name",
+			modelName: "gpt-4-turbo",
+			wantName:  "gpt-4-turbo",
+		},
+		{
+			name:      "default model name",
+			modelName: "gpt-4",
+			wantName:  "gpt-4",
+		},
+		{
+			name:      "gpt-3.5 model name",
+			modelName: "gpt-3.5-turbo",
+			wantName:  "gpt-3.5-turbo",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := NewOpenAIProviderWithConfig(
+				"test-key",
+				"https://api.openai.com/v1/chat/completions",
+				tt.modelName,
+				nil,
+			)
+
+			modelInfo := provider.GetModelInfo()
+
+			if modelInfo.Name != tt.wantName {
+				t.Errorf("GetModelInfo() Name = %s, want %s", modelInfo.Name, tt.wantName)
+			}
+
+			if modelInfo.Version != tt.wantName {
+				t.Errorf("GetModelInfo() Version = %s, want %s", modelInfo.Version, tt.wantName)
+			}
+
+			if modelInfo.Provider != "openai" {
+				t.Errorf("GetModelInfo() Provider = %s, want openai", modelInfo.Provider)
 			}
 		})
 	}
