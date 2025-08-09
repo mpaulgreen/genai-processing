@@ -758,46 +758,8 @@ func (e *simpleLLMEngine) ValidateConnection() error {
 	return nil
 }
 
-// multiModelParser delegates to Claude or OpenAI extractors based on modelType
-type multiModelParser struct {
-	claude interfaces.Parser
-	openai interfaces.Parser
-}
-
-func (m *multiModelParser) ParseResponse(raw *types.RawResponse, modelType string) (*types.StructuredQuery, error) {
-	// Prefer a model-specific parser if it CanHandle the given modelType
-	if m.claude != nil && m.claude.CanHandle(modelType) {
-		return m.claude.ParseResponse(raw, modelType)
-	}
-	if m.openai != nil && m.openai.CanHandle(modelType) {
-		return m.openai.ParseResponse(raw, modelType)
-	}
-	// Default to OpenAI parser if modelType is unknown (it has robust JSON handling)
-	if m.openai != nil {
-		return m.openai.ParseResponse(raw, modelType)
-	}
-	// Fallback to Claude if OpenAI unavailable
-	if m.claude != nil {
-		return m.claude.ParseResponse(raw, modelType)
-	}
-	return nil, fmt.Errorf("no underlying parser available")
-}
-
-func (m *multiModelParser) CanHandle(modelType string) bool {
-	if m.claude != nil && m.claude.CanHandle(modelType) {
-		return true
-	}
-	if m.openai != nil && m.openai.CanHandle(modelType) {
-		return true
-	}
-	// Accept unknown to allow delegation in ParseResponse
-	return true
-}
-
-func (m *multiModelParser) GetConfidence() float64 {
-	// Return a conservative default
-	return 0.8
-}
+// multiModelParser was replaced by a factory-backed delegating parser. The prior
+// implementation has been removed as unused to satisfy staticcheck.
 
 // isTransientError determines whether a provider error is likely transient
 // based on common network/timeouts and HTTP semantics embedded in error text.
