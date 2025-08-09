@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"genai-processing/pkg/types"
 )
 
 // AppConfig represents the main application configuration
@@ -52,16 +54,12 @@ type ModelConfig struct {
 // PromptsConfig defines prompt-related configuration
 type PromptsConfig struct {
 	SystemPrompts map[string]string `yaml:"system_prompts" validate:"required"`
-	Examples      []PromptExample   `yaml:"examples" validate:"required"`
+	Examples      []types.Example   `yaml:"examples" validate:"required"`
 	Formats       PromptFormats     `yaml:"formats" validate:"required"`
 	Validation    PromptValidation  `yaml:"validation" validate:"required"`
 }
 
-// PromptExample represents a few-shot example for the model
-type PromptExample struct {
-	Input  string `yaml:"input" validate:"required"`
-	Output string `yaml:"output" validate:"required"`
-}
+// PromptExample removed in favor of types.Example
 
 // PromptFormats defines model-specific prompt formatting
 type PromptFormats struct {
@@ -288,12 +286,11 @@ func (c *PromptsConfig) Validate() ValidationResult {
 		result.Errors = append(result.Errors, "at least one example must be configured")
 	}
 
+	// Basic non-empty validation for examples
 	for i, example := range c.Examples {
-		if exampleResult := example.Validate(); !exampleResult.Valid {
+		if strings.TrimSpace(example.Input) == "" || strings.TrimSpace(example.Output) == "" {
 			result.Valid = false
-			for _, err := range exampleResult.Errors {
-				result.Errors = append(result.Errors, fmt.Sprintf("example %d: %s", i+1, err))
-			}
+			result.Errors = append(result.Errors, fmt.Sprintf("example %d: input and output cannot be empty", i+1))
 		}
 	}
 
@@ -312,22 +309,7 @@ func (c *PromptsConfig) Validate() ValidationResult {
 	return result
 }
 
-// Validate validates the PromptExample
-func (e *PromptExample) Validate() ValidationResult {
-	result := ValidationResult{Valid: true}
-
-	if strings.TrimSpace(e.Input) == "" {
-		result.Valid = false
-		result.Errors = append(result.Errors, "input cannot be empty")
-	}
-
-	if strings.TrimSpace(e.Output) == "" {
-		result.Valid = false
-		result.Errors = append(result.Errors, "output cannot be empty")
-	}
-
-	return result
-}
+// PromptExample validation removed; using basic non-empty checks for types.Example in PromptsConfig.Validate
 
 // Validate validates the PromptFormats
 func (f *PromptFormats) Validate() ValidationResult {
@@ -499,7 +481,7 @@ language queries into structured JSON parameters.
 
 Respond with valid JSON only - no markdown formatting or explanations.`,
 			},
-			Examples: []PromptExample{
+			Examples: []types.Example{
 				{
 					Input: "Who deleted the customer CRD yesterday?",
 					Output: `{

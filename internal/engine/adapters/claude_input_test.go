@@ -29,8 +29,12 @@ func TestNewClaudeInputAdapter(t *testing.T) {
 		t.Errorf("Expected temperature 0.1, got %f", adapter.Temperature)
 	}
 
-	if adapter.SystemPrompt == "" {
-		t.Error("Expected system prompt to be set")
+	// By default, SystemPrompt should be empty and rely on runtime wiring
+	if adapter.SystemPrompt != "" {
+		t.Error("Expected system prompt to be empty by default")
+	}
+	if adapter.getSystemPromptWithFallback() == "" {
+		t.Error("Expected non-empty fallback system prompt")
 	}
 }
 
@@ -387,32 +391,15 @@ func TestClaudeInputAdapter_SetSystemPrompt(t *testing.T) {
 	}
 }
 
-func TestGetDefaultSystemPrompt(t *testing.T) {
-	prompt := getDefaultSystemPrompt()
-
-	if prompt == "" {
-		t.Error("Expected non-empty system prompt")
+func TestClaudeAdapter_SystemPromptFallback(t *testing.T) {
+	adapter := NewClaudeInputAdapter("test-api-key")
+	if adapter.getSystemPromptWithFallback() == "" {
+		t.Error("Expected non-empty fallback system prompt")
 	}
-
-	// Check for key components in the prompt
-	if !contains(prompt, "OpenShift audit query specialist") {
-		t.Error("Expected 'OpenShift audit query specialist' in system prompt")
-	}
-
-	if !contains(prompt, "log_source") {
-		t.Error("Expected 'log_source' field in system prompt")
-	}
-
-	if !contains(prompt, "kube-apiserver") {
-		t.Error("Expected 'kube-apiserver' in system prompt")
-	}
-
-	if !contains(prompt, "oauth-server") {
-		t.Error("Expected 'oauth-server' in system prompt")
-	}
-
-	if !contains(prompt, "customresourcedefinitions") {
-		t.Error("Expected 'customresourcedefinitions' in system prompt")
+	// After setting, fallback should return the set prompt
+	adapter.SetSystemPrompt("configured")
+	if adapter.getSystemPromptWithFallback() != "configured" {
+		t.Error("Expected configured system prompt from fallback getter")
 	}
 }
 

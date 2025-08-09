@@ -156,6 +156,23 @@ func logConfigurationStatus(appConfig *config.AppConfig) {
 	log.Printf("  Max Input Length: %d", appConfig.Prompts.Validation.MaxInputLength)
 	log.Printf("  Max Output Length: %d", appConfig.Prompts.Validation.MaxOutputLength)
 	log.Printf("  Required Fields: %v", appConfig.Prompts.Validation.RequiredFields)
+	// Which system prompt keys are present
+	keys := []string{"base", "claude_specific", "openai_specific", "generic_specific"}
+	for _, k := range keys {
+		if _, ok := appConfig.Prompts.SystemPrompts[k]; ok {
+			log.Printf("  System Prompt available: %s", k)
+		}
+	}
+	// Active templates presence
+	if t := appConfig.Prompts.Formats.Claude.Template; t != "" {
+		log.Printf("  Formatter template active: claude")
+	}
+	if t := appConfig.Prompts.Formats.OpenAI.Template; t != "" || appConfig.Prompts.Formats.OpenAI.UserMessage != "" || appConfig.Prompts.Formats.OpenAI.SystemMessage != "" {
+		log.Printf("  Formatter template active: openai")
+	}
+	if t := appConfig.Prompts.Formats.Generic.Template; t != "" {
+		log.Printf("  Formatter template active: generic")
+	}
 
 	log.Println("=== Configuration Status Complete ===")
 }

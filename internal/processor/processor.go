@@ -15,6 +15,7 @@ import (
 	"genai-processing/internal/engine/providers"
 	"genai-processing/internal/parser/extractors"
 	"genai-processing/internal/parser/recovery"
+	promptformatters "genai-processing/internal/prompts/formatters"
 	"genai-processing/internal/validator"
 	"genai-processing/pkg/interfaces"
 	"genai-processing/pkg/types"
@@ -38,6 +39,9 @@ type GenAIProcessor struct {
 	providerTimeout time.Duration
 	retryAttempts   int
 	retryDelay      time.Duration
+
+	// Prompt validation settings from prompts.yaml
+	promptValidation config.PromptValidation
 }
 
 // NewGenAIProcessorWithDeps creates a new instance of GenAIProcessor with injected dependencies.
@@ -190,6 +194,56 @@ func NewGenAIProcessorFromConfig(appConfig *config.AppConfig) (*GenAIProcessor, 
 		return nil, fmt.Errorf("failed to create provider '%s': %w", providerType, err)
 	}
 
+	// Helper: choose system prompt from prompts.yaml with fallbacks
+	chooseSystemPrompt := func(providerType string) (string, string) {
+		sys := ""
+		key := ""
+		if appConfig != nil && appConfig.Prompts.SystemPrompts != nil {
+			switch providerType {
+			case "claude":
+				key = "claude_specific"
+				sys = appConfig.Prompts.SystemPrompts[key]
+			case "openai":
+				key = "openai_specific"
+				sys = appConfig.Prompts.SystemPrompts[key]
+			case "generic":
+				key = "generic_specific"
+				sys = appConfig.Prompts.SystemPrompts[key]
+			}
+			if sys == "" {
+				key = "base"
+				sys = appConfig.Prompts.SystemPrompts[key]
+			}
+		}
+		return sys, key
+	}
+
+	// Examples are already []types.Example in config
+
+	// Helper: select formatter implementation based on mc.PromptFormatter or provider type
+	// Falls back gracefully when templates are missing
+	makeFormatter := func(providerType string, formatterName string) interfaces.PromptFormatter {
+		// Prefer explicit formatterName if provided
+		normalized := strings.ToLower(formatterName)
+		kind := providerType
+		if strings.Contains(normalized, "openai") {
+			kind = "openai"
+		} else if strings.Contains(normalized, "claude") {
+			kind = "claude"
+		} else if strings.Contains(normalized, "generic") {
+			kind = "generic"
+		}
+		switch kind {
+		case "claude":
+			return promptformatters.NewClaudeFormatter(appConfig.Prompts.Formats.Claude.Template)
+		case "openai":
+			of := appConfig.Prompts.Formats.OpenAI
+			return promptformatters.NewOpenAIFormatter(of.Template, of.SystemMessage, of.UserMessage)
+		default:
+			return promptformatters.NewGenericFormatter(appConfig.Prompts.Formats.Generic.Template)
+		}
+	}
+
 	// Build input adapter based on config
 	var adapter interfaces.InputAdapter
 	switch mc.InputAdapter {
@@ -198,9 +252,18 @@ func NewGenAIProcessorFromConfig(appConfig *config.AppConfig) (*GenAIProcessor, 
 		claude.SetModelName(mc.ModelName)
 		_ = claude.SetMaxTokens(mc.MaxTokens)
 		_ = claude.SetTemperature(mc.Temperature)
+		// System prompt precedence: models.yaml parameters.system > prompts.yaml
 		if sys, ok := activeCfg.Parameters["system"].(string); ok && sys != "" {
 			claude.SetSystemPrompt(sys)
+			logger.Printf("system prompt: override from models.yaml parameters.system for provider claude")
+		} else if sp, key := chooseSystemPrompt("claude"); sp != "" {
+			claude.SetSystemPrompt(sp)
+			logger.Printf("system prompt: selected '%s' for provider claude", key)
 		}
+		// Wire examples from prompts.yaml
+		claude.SetExamples(appConfig.Prompts.Examples)
+		// Formatter (mc.PromptFormatter overrides provider default)
+		claude.SetFormatter(makeFormatter("claude", mc.PromptFormatter))
 		adapter = claude
 	case "openai_input_adapter":
 		openai := adapters.NewOpenAIInputAdapter(mc.APIKey)
@@ -209,13 +272,28 @@ func NewGenAIProcessorFromConfig(appConfig *config.AppConfig) (*GenAIProcessor, 
 		_ = openai.SetTemperature(mc.Temperature)
 		if sys, ok := activeCfg.Parameters["system"].(string); ok && sys != "" {
 			openai.SetSystemPrompt(sys)
+			logger.Printf("system prompt: override from models.yaml parameters.system for provider openai")
+		} else if sp, key := chooseSystemPrompt("openai"); sp != "" {
+			openai.SetSystemPrompt(sp)
+			logger.Printf("system prompt: selected '%s' for provider openai", key)
 		}
+		openai.SetExamples(appConfig.Prompts.Examples)
+		openai.SetFormatter(makeFormatter("openai", mc.PromptFormatter))
 		adapter = openai
 	default:
 		generic := adapters.NewGenericInputAdapter(mc.APIKey)
 		generic.SetModelName(mc.ModelName)
 		_ = generic.SetMaxTokens(mc.MaxTokens)
 		_ = generic.SetTemperature(mc.Temperature)
+		generic.SetExamples(appConfig.Prompts.Examples)
+		if sys, ok := activeCfg.Parameters["system"].(string); ok && sys != "" {
+			generic.SetSystemPrompt(sys)
+			logger.Printf("system prompt: override from models.yaml parameters.system for provider generic")
+		} else if sp, key := chooseSystemPrompt("generic"); sp != "" {
+			generic.SetSystemPrompt(sp)
+			logger.Printf("system prompt: selected '%s' for provider generic", key)
+		}
+		generic.SetFormatter(makeFormatter("generic", mc.PromptFormatter))
 		// Generic adapter has no SetSystemPrompt
 		adapter = generic
 	}
@@ -232,6 +310,10 @@ func NewGenAIProcessorFromConfig(appConfig *config.AppConfig) (*GenAIProcessor, 
 		RepromptTemplate:    "The previous response was not in the expected JSON format. Please provide a valid JSON response for the following query: %s",
 	}
 	retryParser := recovery.NewRetryParser(retryConfig, llmEngine, contextManager)
+	// Enforce LLM output length from prompts validation if specified
+	if appConfig.Prompts.Validation.MaxOutputLength > 0 {
+		retryParser.SetMaxOutputLength(appConfig.Prompts.Validation.MaxOutputLength)
+	}
 
 	// Parser preferences based on OutputParser
 	claudeExtractor := extractors.NewClaudeExtractor()
@@ -253,21 +335,22 @@ func NewGenAIProcessorFromConfig(appConfig *config.AppConfig) (*GenAIProcessor, 
 	// Safety validator
 	safetyValidator := validator.NewSafetyValidator()
 
-	// Log prompt formatter selection for future handling
+	// Log prompt formatter selection (now active via formatters package)
 	if mc.PromptFormatter != "" {
-		logger.Printf("prompt_formatter: %s (TODO: integrate custom formatting)", mc.PromptFormatter)
+		logger.Printf("prompt_formatter active: %s", mc.PromptFormatter)
 	}
 
 	proc := &GenAIProcessor{
-		contextManager:  contextManager,
-		llmEngine:       llmEngine,
-		RetryParser:     retryParser,
-		safetyValidator: safetyValidator,
-		defaultModel:    mc.ModelName,
-		logger:          logger,
-		providerTimeout: mc.Timeout,
-		retryAttempts:   mc.RetryAttempts,
-		retryDelay:      mc.RetryDelay,
+		contextManager:   contextManager,
+		llmEngine:        llmEngine,
+		RetryParser:      retryParser,
+		safetyValidator:  safetyValidator,
+		defaultModel:     mc.ModelName,
+		logger:           logger,
+		providerTimeout:  mc.Timeout,
+		retryAttempts:    mc.RetryAttempts,
+		retryDelay:       mc.RetryDelay,
+		promptValidation: appConfig.Prompts.Validation,
 	}
 
 	return proc, nil
@@ -302,6 +385,24 @@ func mapProviderType(key string, providerName string) string {
 func (p *GenAIProcessor) ProcessQuery(ctx context.Context, req *types.ProcessingRequest) (*types.ProcessingResponse, error) {
 	startTime := time.Now()
 	p.logger.Printf("Starting query processing for session: %s", req.SessionID)
+
+	// Step 0: Enforce configured input length from prompts validation (if available)
+	// Enforce max input length from prompts validation if configured on processor
+	if p.promptValidation.MaxInputLength > 0 && len(req.Query) > p.promptValidation.MaxInputLength {
+		req.Query = req.Query[:p.promptValidation.MaxInputLength]
+	}
+
+	// Basic forbidden words sanitization
+	if len(p.promptValidation.ForbiddenWords) > 0 {
+		q := req.Query
+		for _, w := range p.promptValidation.ForbiddenWords {
+			if w == "" {
+				continue
+			}
+			q = strings.ReplaceAll(q, w, "")
+		}
+		req.Query = q
+	}
 
 	// Step 1: Context resolution
 	resolvedQuery, err := p.resolveContext(req.Query, req.SessionID)
@@ -414,7 +515,45 @@ func (p *GenAIProcessor) ProcessQuery(ctx context.Context, req *types.Processing
 		return p.createErrorResponse("parsing_failed", err), nil
 	}
 
-	// Step 6: Safety validation
+	// Step 6a: Enhanced prompt validation required fields
+	if sq := structuredQuery; sq != nil {
+		for _, rf := range p.promptValidation.RequiredFields {
+			switch strings.ToLower(rf) {
+			case "log_source", "logsource":
+				if strings.TrimSpace(sq.LogSource) == "" {
+					return p.createErrorResponse("validation_failed", fmt.Errorf("required field missing: log_source")), nil
+				}
+			case "verb":
+				if sq.Verb.IsEmpty() {
+					return p.createErrorResponse("validation_failed", fmt.Errorf("required field missing: verb")), nil
+				}
+			case "resource":
+				if sq.Resource.IsEmpty() {
+					return p.createErrorResponse("validation_failed", fmt.Errorf("required field missing: resource")), nil
+				}
+			case "timeframe":
+				if strings.TrimSpace(sq.Timeframe) == "" {
+					return p.createErrorResponse("validation_failed", fmt.Errorf("required field missing: timeframe")), nil
+				}
+			case "user":
+				if sq.User.IsEmpty() {
+					return p.createErrorResponse("validation_failed", fmt.Errorf("required field missing: user")), nil
+				}
+			case "namespace":
+				if sq.Namespace.IsEmpty() {
+					return p.createErrorResponse("validation_failed", fmt.Errorf("required field missing: namespace")), nil
+				}
+			case "limit":
+				if sq.Limit <= 0 {
+					return p.createErrorResponse("validation_failed", fmt.Errorf("required field missing or invalid: limit")), nil
+				}
+			default:
+				p.logger.Printf("warning: unknown required field '%s' in validation config", rf)
+			}
+		}
+	}
+
+	// Step 6b: Safety validation
 	p.logger.Printf("Validating query safety")
 	validationResult, err := p.safetyValidator.ValidateQuery(structuredQuery)
 	if err != nil {
@@ -499,13 +638,15 @@ type simpleLLMEngine struct {
 
 // ProcessQuery implements the LLMEngine interface
 func (e *simpleLLMEngine) ProcessQuery(ctx context.Context, query string, context types.ConversationContext) (*types.RawResponse, error) {
+	// Minimal fallback system prompt for backward compatibility
+	fallbackPrompt := "Convert natural language queries to JSON parameters for audit log analysis."
 	// Create a simple model request
 	modelReq := &types.ModelRequest{
 		Model: "claude-3-5-sonnet-20241022",
 		Messages: []interface{}{
 			map[string]interface{}{
 				"role":    "system",
-				"content": getSystemPrompt(),
+				"content": fallbackPrompt,
 			},
 			map[string]interface{}{
 				"role":    "user",
@@ -515,7 +656,7 @@ func (e *simpleLLMEngine) ProcessQuery(ctx context.Context, query string, contex
 		Parameters: map[string]interface{}{
 			"max_tokens":  4000,
 			"temperature": 0.1,
-			"system":      getSystemPrompt(),
+			"system":      fallbackPrompt,
 		},
 	}
 
@@ -534,14 +675,14 @@ func (e *simpleLLMEngine) GetProvider() interfaces.LLMProvider {
 
 // AdaptInput adapts an internal request to model-specific format
 func (e *simpleLLMEngine) AdaptInput(req *types.InternalRequest) (*types.ModelRequest, error) {
-	// For now, return a basic model request
-	// In a full implementation, this would use input adapters
+	// For now, return a basic model request with minimal fallback prompt
+	fallbackPrompt := "Convert natural language queries to JSON parameters for audit log analysis."
 	return &types.ModelRequest{
 		Model: "claude-3-5-sonnet-20241022",
 		Messages: []interface{}{
 			map[string]interface{}{
 				"role":    "system",
-				"content": getSystemPrompt(),
+				"content": fallbackPrompt,
 			},
 			map[string]interface{}{
 				"role":    "user",
@@ -551,7 +692,7 @@ func (e *simpleLLMEngine) AdaptInput(req *types.InternalRequest) (*types.ModelRe
 		Parameters: map[string]interface{}{
 			"max_tokens":  4000,
 			"temperature": 0.1,
-			"system":      getSystemPrompt(),
+			"system":      fallbackPrompt,
 		},
 	}, nil
 }
@@ -656,24 +797,4 @@ func isTransientError(err error) bool {
 }
 
 // getSystemPrompt returns the system prompt for OpenShift audit queries
-func getSystemPrompt() string {
-	return `You are an OpenShift audit query specialist. Convert natural language queries into structured JSON parameters for audit log analysis.
-
-Always respond with valid JSON only. Do not include any markdown formatting, explanations, or additional text outside the JSON structure.
-
-The JSON should follow this structure:
-{
-  "log_source": "kube-apiserver|openshift-apiserver|oauth-server|oauth-apiserver",
-  "verb": "get|list|create|update|patch|delete",
-  "resource": "pods|services|deployments|namespaces|etc",
-  "namespace": "namespace_name",
-  "user": "username",
-  "timeframe": "today|yesterday|1_hour_ago|7_days_ago",
-  "limit": 20,
-  "exclude_users": ["system:", "kube-"],
-  "resource_name_pattern": "pattern",
-  "auth_decision": "allow|error|forbid"
-Examples:
-- "Who deleted the customer CRD yesterday?" → {"log_source": "kube-apiserver", "verb": "delete", "resource": "customresourcedefinitions", "resource_name_pattern": "customer", "timeframe": "yesterday", "exclude_users": ["system:"], "limit": 20}
-- "Show me all failed authentication attempts in the last hour" → {"log_source": "oauth-server", "timeframe": "1_hour_ago", "auth_decision": "error", "limit": 20}`
-}
+// System prompts are managed via prompts.yaml. This minimal fallback remains only for backward compatibility.

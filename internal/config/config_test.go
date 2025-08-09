@@ -1,6 +1,7 @@
 package config
 
 import (
+	"genai-processing/pkg/types"
 	"testing"
 	"time"
 )
@@ -195,7 +196,7 @@ func TestPromptsConfig_Validate(t *testing.T) {
 					"claude_specific": "Claude prompt",
 					"openai_specific": "OpenAI prompt",
 				},
-				Examples: []PromptExample{
+				Examples: []types.Example{
 					{
 						Input:  "test input",
 						Output: "test output",
@@ -218,7 +219,7 @@ func TestPromptsConfig_Validate(t *testing.T) {
 			name: "missing system prompts",
 			config: PromptsConfig{
 				SystemPrompts: map[string]string{},
-				Examples:      []PromptExample{},
+				Examples:      []types.Example{},
 				Formats:       PromptFormats{},
 				Validation:    PromptValidation{},
 			},
@@ -230,7 +231,7 @@ func TestPromptsConfig_Validate(t *testing.T) {
 				SystemPrompts: map[string]string{
 					"base": "Base prompt",
 				},
-				Examples:   []PromptExample{},
+				Examples:   []types.Example{},
 				Formats:    PromptFormats{},
 				Validation: PromptValidation{},
 			},

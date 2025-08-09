@@ -96,10 +96,10 @@ type TokenUsage struct {
 // This struct contains input-output pairs used to guide model responses.
 type Example struct {
 	// Input is the example input query or prompt
-	Input string `json:"input"`
+	Input string `json:"input" yaml:"input"`
 
 	// Output is the expected output or response for the input
-	Output string `json:"output"`
+	Output string `json:"output" yaml:"output"`
 
 	// Description provides context about what this example demonstrates
 	Description string `json:"description,omitempty"`

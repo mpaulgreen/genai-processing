@@ -66,6 +66,9 @@ type RetryParser struct {
 	llmEngine interfaces.LLMEngine
 	// contextManager is used for context-aware re-prompting
 	contextManager interfaces.ContextManager
+
+	// maxOutputLength, when >0, enforces a maximum raw response length before parsing
+	maxOutputLength int
 }
 
 // NewRetryParser creates a new RetryParser with the given configuration.
@@ -98,6 +101,11 @@ func (r *RetryParser) RegisterParser(strategy RetryStrategy, parser interfaces.P
 func (r *RetryParser) ParseWithRetry(ctx context.Context, raw *types.RawResponse, modelType string, originalQuery string, sessionID string) (*types.StructuredQuery, error) {
 	if raw == nil {
 		return nil, errors.NewParsingError("raw response is nil", errors.ComponentParser, "retry_parser", 0.0, "")
+	}
+
+	// Enforce maximum output length if configured
+	if r.maxOutputLength > 0 && len(raw.Content) > r.maxOutputLength {
+		raw.Content = raw.Content[:r.maxOutputLength]
 	}
 
 	var lastError *errors.ParsingError
@@ -385,6 +393,12 @@ func (r *RetryParser) SetConfiguration(config *RetryConfig) error {
 // GetConfiguration returns the current retry configuration.
 func (r *RetryParser) GetConfiguration() *RetryConfig {
 	return r.config
+}
+
+// SetMaxOutputLength sets a maximum length for raw model outputs to consider during parsing.
+// A value <= 0 disables the enforcement.
+func (r *RetryParser) SetMaxOutputLength(max int) {
+	r.maxOutputLength = max
 }
 
 // IsRecoverableError determines if an error is recoverable through retry.

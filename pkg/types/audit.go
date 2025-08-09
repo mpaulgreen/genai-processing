@@ -2,6 +2,7 @@ package types
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 )
 
@@ -51,14 +52,26 @@ func (sa *StringOrArray) GetValue() interface{} {
 
 // IsEmpty returns true if the value is nil or empty
 func (sa *StringOrArray) IsEmpty() bool {
+	if sa == nil {
+		return true
+	}
 	if sa.value == nil {
 		return true
 	}
 	if str, ok := sa.value.(string); ok {
-		return str == ""
+		return strings.TrimSpace(str) == ""
 	}
 	if arr, ok := sa.value.([]string); ok {
-		return len(arr) == 0
+		if len(arr) == 0 {
+			return true
+		}
+		// Consider empty if all entries are empty/whitespace
+		for _, s := range arr {
+			if strings.TrimSpace(s) != "" {
+				return false
+			}
+		}
+		return true
 	}
 	return true
 }

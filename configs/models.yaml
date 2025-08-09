@@ -13,7 +13,7 @@
 # - The LLM engine is created with the selected provider + adapter
 # - Timeout and retry (timeout, retry_attempts, retry_delay) wrap provider calls during request processing
 # - Output parser preference (output_parser) orders parsing attempts; Generic parser is always registered as fallback
-# - `prompt_formatter` is currently logged for observability (adapters handle formatting today)
+# - `prompt_formatter` selects a formatter implementation; templates come from prompts.yaml
 #
 # Notation and typing
 # - YAML numbers (e.g., max_tokens: 4000, temperature: 0.1) are parsed as numbers
@@ -76,8 +76,8 @@ providers:
     input_adapter: "claude_input_adapter"
     # output_parser: preference order for parsing; Generic is always added as fallback
     output_parser: "claude_extractor"
-    # prompt_formatter: currently only logged (adapters handle formatting). Keep for future switching.
-    prompt_formatter: "claude_formatter"
+    # prompt_formatter: selects how prompts are rendered for this provider
+    prompt_formatter: "claude"
     parameters:
       # Additional provider-specific parameters forwarded to clients.
       # Strings that look numeric (e.g., "4000") will be parsed into numbers at runtime.
@@ -100,7 +100,7 @@ providers:
     retry_delay: "1s"
     input_adapter: "openai_input_adapter"
     output_parser: "openai_extractor"
-    prompt_formatter: "openai_formatter"
+    prompt_formatter: "openai"
     parameters:
       system: "You are an OpenShift audit query specialist."
       max_tokens: "4000"
@@ -121,7 +121,7 @@ providers:
     retry_delay: "1s"
     input_adapter: "ollama_input_adapter"
     output_parser: "generic_extractor"
-    prompt_formatter: "generic_formatter"
+    prompt_formatter: "generic"
     parameters:
       system: "You are an OpenShift audit query specialist."
       max_tokens: "4000"
@@ -142,7 +142,7 @@ providers:
     retry_delay: "1s"
     input_adapter: "ollama_input_adapter"
     output_parser: "generic_extractor"
-    prompt_formatter: "generic_formatter"
+    prompt_formatter: "generic"
     parameters:
       system: "You are an OpenShift audit query specialist."
       max_tokens: "4000"

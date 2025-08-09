@@ -17,6 +17,15 @@ type GenericInputAdapter struct {
 	ModelName   string
 	MaxTokens   int
 	Temperature float64
+
+	// SystemPrompt is the optional system prompt to prepend
+	SystemPrompt string
+
+	// examples are few-shot examples to include in prompt formatting
+	examples []types.Example
+
+	// formatter formats prompts using configurable templates when provided
+	formatter interfaces.PromptFormatter
 }
 
 // GenericMessage represents a single chat message
@@ -47,7 +56,7 @@ func (g *GenericInputAdapter) AdaptRequest(req *types.InternalRequest) (*types.M
 		)
 	}
 
-	formattedPrompt, err := g.FormatPrompt(req.ProcessingRequest.Query, []types.Example{})
+	formattedPrompt, err := g.FormatPrompt(req.ProcessingRequest.Query, g.examples)
 	if err != nil {
 		return nil, errors.NewInputAdapterError(
 			fmt.Sprintf("failed to format prompt: %v", err),
@@ -87,7 +96,17 @@ func (g *GenericInputAdapter) FormatPrompt(prompt string, examples []types.Examp
 		)
 	}
 
+	// Prefer formatter when available
+	if g.formatter != nil {
+		return g.formatter.FormatComplete(g.SystemPrompt, examples, prompt)
+	}
+
 	var builder strings.Builder
+	// Include system prompt if available
+	if strings.TrimSpace(g.SystemPrompt) != "" {
+		builder.WriteString(g.SystemPrompt)
+		builder.WriteString("\n\n")
+	}
 	if len(examples) > 0 {
 		builder.WriteString("Examples:\n\n")
 		for i, ex := range examples {
@@ -123,6 +142,7 @@ func (g *GenericInputAdapter) GetAPIParameters() map[string]interface{} {
 		"temperature": g.Temperature,
 		"provider":    "generic",
 		"created_at":  time.Now().UTC(),
+		"system":      g.SystemPrompt,
 	}
 }
 
@@ -222,3 +242,14 @@ func (g *GenericInputAdapter) SetTemperature(temperature float64) error {
 
 // Ensure GenericInputAdapter implements the InputAdapter interface
 var _ interfaces.InputAdapter = (*GenericInputAdapter)(nil)
+
+// SetExamples sets few-shot examples to include in formatting
+func (g *GenericInputAdapter) SetExamples(examples []types.Example) { g.examples = examples }
+
+// SetFormatter sets a custom prompt formatter
+func (g *GenericInputAdapter) SetFormatter(formatter interfaces.PromptFormatter) {
+	g.formatter = formatter
+}
+
+// SetSystemPrompt sets a custom system prompt
+func (g *GenericInputAdapter) SetSystemPrompt(prompt string) { g.SystemPrompt = prompt }

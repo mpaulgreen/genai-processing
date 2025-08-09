@@ -26,8 +26,14 @@ type OpenAIInputAdapter struct {
 	// Temperature controls the randomness of responses (0.0 to 2.0)
 	Temperature float64
 
-	// SystemPrompt is the hard-coded system prompt for OpenShift audit queries
+	// SystemPrompt is the system prompt for OpenShift audit queries
 	SystemPrompt string
+
+	// examples are few-shot examples to include in prompt formatting
+	examples []types.Example
+
+	// formatter formats prompts using configurable templates when provided
+	formatter interfaces.PromptFormatter
 }
 
 // OpenAIMessage represents a single message in OpenAI's chat format
@@ -47,11 +53,13 @@ type OpenAIRequest struct {
 // NewOpenAIInputAdapter creates a new OpenAIInputAdapter with default configuration
 func NewOpenAIInputAdapter(apiKey string) *OpenAIInputAdapter {
 	return &OpenAIInputAdapter{
-		APIKey:       apiKey,
-		ModelName:    "gpt-4",
-		MaxTokens:    4000,
-		Temperature:  0.1,
-		SystemPrompt: getOpenAIDefaultSystemPrompt(),
+		APIKey:      apiKey,
+		ModelName:   "gpt-4",
+		MaxTokens:   4000,
+		Temperature: 0.1,
+		// Empty by default; processor wiring should set this from prompts.yaml.
+		// Fallbacks are handled by getSystemPromptWithFallback().
+		SystemPrompt: "",
 	}
 }
 
@@ -71,7 +79,7 @@ func (o *OpenAIInputAdapter) AdaptRequest(req *types.InternalRequest) (*types.Mo
 	}
 
 	// Format the prompt with system/user message format and examples
-	formattedPrompt, err := o.FormatPrompt(req.ProcessingRequest.Query, []types.Example{})
+	formattedPrompt, err := o.FormatPrompt(req.ProcessingRequest.Query, o.examples)
 	if err != nil {
 		return nil, errors.NewInputAdapterError(
 			fmt.Sprintf("failed to format prompt: %v", err),
@@ -86,7 +94,7 @@ func (o *OpenAIInputAdapter) AdaptRequest(req *types.InternalRequest) (*types.Mo
 	messages := []OpenAIMessage{
 		{
 			Role:    "system",
-			Content: o.SystemPrompt,
+			Content: o.getSystemPromptWithFallback(),
 		},
 		{
 			Role:    "user",
@@ -124,6 +132,11 @@ func (o *OpenAIInputAdapter) FormatPrompt(prompt string, examples []types.Exampl
 			"openai_input_adapter",
 			false,
 		)
+	}
+
+	// Prefer formatter when available
+	if o.formatter != nil {
+		return o.formatter.FormatComplete(o.SystemPrompt, examples, prompt)
 	}
 
 	// Build system/user message format
@@ -167,6 +180,7 @@ func (o *OpenAIInputAdapter) GetAPIParameters() map[string]interface{} {
 		"temperature": o.Temperature,
 		"provider":    "openai",
 		"created_at":  time.Now().UTC(),
+		"system":      o.SystemPrompt,
 	}
 }
 
@@ -275,65 +289,22 @@ func (o *OpenAIInputAdapter) SetSystemPrompt(prompt string) {
 	o.SystemPrompt = prompt
 }
 
-// getOpenAIDefaultSystemPrompt returns the hard-coded system prompt for OpenShift audit queries
-// This is the same as Claude's system prompt since both models need to understand
-// the same OpenShift audit query domain
-func getOpenAIDefaultSystemPrompt() string {
-	return `You are an OpenShift audit query specialist. Your task is to convert natural language queries into structured JSON parameters for audit log analysis.
-
-You must respond with valid JSON only. Do not include any markdown formatting, explanations, or additional text outside the JSON structure.
-
-The JSON response should follow this schema:
-{
-  "log_source": "string or array",           // Source of audit logs (kube-apiserver, oauth-server, etc.)
-  "verb": "string or array",                 // HTTP verb(s) to filter on
-  "resource": "string or array",             // Kubernetes resource type(s)
-  "namespace": "string or array",            // Specific namespace(s) to filter
-  "user": "string or array",                 // Specific user(s) to filter
-  "timeframe": "string",                     // Time period (today, yesterday, 1_hour_ago, etc.)
-  "limit": "number",                         // Maximum number of results to return
-  "response_status": "string or array",      // HTTP response status filter
-  "exclude_users": ["array of strings"],     // User patterns to exclude
-  "resource_name_pattern": "string",         // Regex pattern for resource name matching
-  "user_pattern": "string",                  // Regex pattern for user matching
-  "namespace_pattern": "string",             // Regex pattern for namespace matching
-  "request_uri_pattern": "string",           // URI pattern matching
-  "auth_decision": "string",                 // Authentication decision filter
-  "source_ip": "string or array",            // Source IP address filtering
-  "group_by": "string or array",             // Fields to group results by
-  "sort_by": "string",                       // Sort field
-  "sort_order": "string",                    // Sort direction (asc, desc)
-  "time_range": {                            // Custom time range
-    "start": "string (ISO 8601)",
-    "end": "string (ISO 8601)"
-  },
-  "business_hours": {                        // Business hours filtering
-    "outside_only": "boolean",
-    "start_hour": "number (0-23)",
-    "end_hour": "number (0-23)"
-  },
-  "analysis": {                              // Analysis configuration
-    "type": "string",
-    "group_by": "string or array",
-    "threshold": "number"
-  }
+// SetExamples sets few-shot examples to include in formatting
+func (o *OpenAIInputAdapter) SetExamples(examples []types.Example) {
+	o.examples = examples
 }
 
-Key guidelines:
-1. Always include "log_source" field
-2. Use "kube-apiserver" for Kubernetes API operations
-3. Use "oauth-server" for authentication events
-4. Exclude system users by default using "exclude_users": ["system:", "kube-"]
-5. Set reasonable limits (default 20, max 1000)
-6. Use appropriate timeframes for security investigations
-7. Include pattern matching for flexible resource name filtering
+// SetFormatter sets a custom prompt formatter
+func (o *OpenAIInputAdapter) SetFormatter(formatter interfaces.PromptFormatter) {
+	o.formatter = formatter
+}
 
-Examples of common patterns:
-- CRD operations: resource="customresourcedefinitions"
-- Pod operations: resource="pods"
-- Authentication failures: log_source="oauth-server", auth_decision="error"
-- Privilege escalation: verb=["create", "update", "patch"], resource=["roles", "rolebindings"]
-- Data exfiltration: verb="get", resource=["secrets", "configmaps"]`
+// getSystemPromptWithFallback returns configured system prompt or a minimal fallback
+func (o *OpenAIInputAdapter) getSystemPromptWithFallback() string {
+	if strings.TrimSpace(o.SystemPrompt) != "" {
+		return o.SystemPrompt
+	}
+	return "You are an OpenShift audit query specialist. Convert natural language queries into structured JSON parameters for audit log analysis.\n\nAlways respond with valid JSON only. Do not include any markdown formatting, explanations, or additional text outside the JSON structure."
 }
 
 // Ensure OpenAIInputAdapter implements the InputAdapter interface
