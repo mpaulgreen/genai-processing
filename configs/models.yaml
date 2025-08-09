@@ -1,26 +1,86 @@
 # Models configuration for GenAI Processing Layer
-# This file configures different LLM providers and their parameters for OpenShift audit queries
+#
+# Purpose
+# - Declare one or more model providers and how the processing runtime should talk to them
+# - Control adapter selection (how prompts are formatted), parser preference (how outputs are parsed),
+#   and reliability knobs (timeouts and retries)
+# - Provide model-specific parameters that map directly to the underlying provider client
+#
+# How it’s used at runtime
+# - The server loads this file into `AppConfig.Models`
+# - The processor builds a ProviderFactory from `providers` and selects the active provider via `default_provider`
+# - Input Adapter is chosen per provider (see input_adapter). It sets model name, max_tokens, temperature and optional system prompt
+# - The LLM engine is created with the selected provider + adapter
+# - Timeout and retry (timeout, retry_attempts, retry_delay) wrap provider calls during request processing
+# - Output parser preference (output_parser) orders parsing attempts; Generic parser is always registered as fallback
+# - `prompt_formatter` is currently logged for observability (adapters handle formatting today)
+#
+# Notation and typing
+# - YAML numbers (e.g., max_tokens: 4000, temperature: 0.1) are parsed as numbers
+# - Inside `parameters`, values may be strings or numbers. The runtime will try to parse numeric-looking strings
+#   into ints/floats automatically. For example, "4000" → 4000, "0.1" → 0.1. Keep non-numeric values as strings.
+#
+# Environment variables
+# - api_key supports env placeholders like ${ANTHROPIC_API_KEY} or ${OPENAI_API_KEY}
+# - You may also use ${VAR_NAME:-default_value} to provide a fallback
+#
+# Provider mapping
+# - provider: "anthropic" → provider type "claude"
+# - provider: "openai" → provider type "openai"
+# - any other provider value (e.g., "ollama", "custom") uses the generic provider path
+#   (expects OpenAI-compatible chat completions or a generic JSON chat API at the given endpoint)
+#
+# Input adapters
+# - claude_input_adapter: XML-style system instructions + user message (Claude-friendly)
+# - openai_input_adapter: system + user chat messages (OpenAI-friendly)
+# - generic_input_adapter (or any unknown): simple OpenAI-compatible prompt with a single user message
+#
+# Output parsers
+# - claude_extractor: prioritize Claude-specific extractor first
+# - openai_extractor: prioritize OpenAI-specific extractor first
+# - any/unspecified: use a multi-model specific parser (delegates by model name) with Generic as fallback
+#   (Generic extractor uses robust JSON extraction via regex/code-block detection)
+#
+# Reliability
+# - timeout: per-request timeout applied around the provider call (e.g., "60s")
+# - retry_attempts: number of additional tries on transient errors (0 = no retry)
+# - retry_delay: sleep between retries (e.g., "1s")
+#   Transient errors include timeouts, temporary network issues, 429/502/503/504, etc.
 
 # Default provider to use when no specific model is requested
 default_provider: "claude"
 
-# Provider configurations
+# Provider configurations (each key is a logical name; referenced by default_provider and logs)
 providers:
   # Claude 3.5 Sonnet - Primary provider for OpenShift audit queries
   claude:
+    # provider: the underlying vendor or style. "anthropic" maps to provider type "claude"
     provider: "anthropic"
+    # endpoint: full HTTPS URL for the API; defaults exist but explicit is preferred
     endpoint: "https://api.anthropic.com/v1/messages"
+    # api_key: secret or environment placeholder used by the provider client
     api_key: "${ANTHROPIC_API_KEY}"
+    # model_name: default model for this provider entry
     model_name: "claude-3-5-sonnet-20241022"
+    # max_tokens: cap on output tokens; also forwarded in parameters
     max_tokens: 4000
+    # temperature: sampling temperature; typical range 0.0–1.0 for Claude
     temperature: 0.1
+    # timeout: per-call timeout used by the processor when invoking the provider
     timeout: "60s"
+    # retry_attempts: number of extra tries for transient errors
     retry_attempts: 3
+    # retry_delay: delay between retries
     retry_delay: "1s"
+    # input_adapter: chooses how to build the request payload for this provider
     input_adapter: "claude_input_adapter"
+    # output_parser: preference order for parsing; Generic is always added as fallback
     output_parser: "claude_extractor"
+    # prompt_formatter: currently only logged (adapters handle formatting). Keep for future switching.
     prompt_formatter: "claude_formatter"
     parameters:
+      # Additional provider-specific parameters forwarded to clients.
+      # Strings that look numeric (e.g., "4000") will be parsed into numbers at runtime.
       system: "You are an OpenShift audit query specialist."
       max_tokens: "4000"
       temperature: "0.1"
@@ -45,14 +105,14 @@ providers:
       system: "You are an OpenShift audit query specialist."
       max_tokens: "4000"
       temperature: "0.1"
-      presence_penalty: "0.0"
+      presence_penalty: "0.0"   # OpenAI-specific knobs (mapped if present)
       frequency_penalty: "0.0"
 
   # Local Llama 3.1 - For offline/air-gapped environments
   local_llama:
-    provider: "ollama"
+    provider: "ollama"          # Non-Anthropic/OpenAI -> uses Generic provider path
     endpoint: "http://localhost:11434"
-    api_key: ""
+    api_key: ""                 # Often empty for local models
     model_name: "llama3.1:8b"
     max_tokens: 4000
     temperature: 0.1
@@ -92,7 +152,7 @@ providers:
 
   # User-provided model - For custom/enterprise models
   user_model:
-    provider: "generic"
+    provider: "generic"         # Use this for custom or enterprise gateways
     endpoint: "http://localhost:8080"
     api_key: ""
     model_name: "custom-model"
@@ -111,13 +171,13 @@ providers:
 
 # Model capabilities and constraints
 capabilities:
-  # Maximum query length for input processing
+  # Maximum query length for input processing; requests longer than this should be trimmed upstream
   max_query_length: 1000
   
-  # Maximum response length for output processing
+  # Maximum response length for output processing; used to inform prompt design and validation
   max_response_length: 2000
   
-  # Supported log sources for OpenShift audit queries
+  # Supported log sources for OpenShift audit queries (validators may enforce these)
   supported_log_sources:
     - "kube-apiserver"
     - "openshift-apiserver"
@@ -133,7 +193,7 @@ capabilities:
     - "patch"
     - "delete"
   
-  # Supported Kubernetes resources
+  # Supported Kubernetes resources (not exhaustive; common high-signal resources listed)
   supported_resources:
     - "pods"
     - "services"
@@ -153,7 +213,7 @@ capabilities:
 
 # Safety and validation settings
 safety:
-  # Forbidden patterns that should be rejected
+  # Forbidden patterns that should be rejected by validators and/or prompts
   forbidden_patterns:
     - "rm -rf"
     - "delete --all"
@@ -163,17 +223,17 @@ safety:
     - "shutdown"
     - "reboot"
   
-  # Timeframe limits for audit queries
+  # Timeframe limits for audit queries; guardrails for unbounded data scans
   timeframe_limits:
     max_days_back: 90
     default_limit: 20
     max_limit: 1000
   
-  # Required fields for valid audit queries
+  # Required fields for valid audit queries; parsers should aim to produce these
   required_fields:
     - "log_source"
   
-  # User patterns to exclude by default
+  # User patterns to exclude by default; reduces noise from system identities
   default_exclude_users:
     - "system:"
     - "kube-"
