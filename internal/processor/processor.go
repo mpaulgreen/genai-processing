@@ -2,11 +2,16 @@ package processor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
+	"genai-processing/internal/config"
 	contextpkg "genai-processing/internal/context"
+	"genai-processing/internal/engine"
+	"genai-processing/internal/engine/adapters"
 	"genai-processing/internal/engine/providers"
 	"genai-processing/internal/parser/extractors"
 	"genai-processing/internal/parser/recovery"
@@ -28,6 +33,11 @@ type GenAIProcessor struct {
 	// Configuration
 	defaultModel string
 	logger       *log.Logger
+
+	// Provider execution controls
+	providerTimeout time.Duration
+	retryAttempts   int
+	retryDelay      time.Duration
 }
 
 // NewGenAIProcessorWithDeps creates a new instance of GenAIProcessor with injected dependencies.
@@ -96,6 +106,193 @@ func NewGenAIProcessor() *GenAIProcessor {
 	)
 }
 
+// NewGenAIProcessorFromConfig creates a new GenAIProcessor using the provided AppConfig.
+// It wires providers, adapters, engine, retry parser, and validator based on models.yaml.
+func NewGenAIProcessorFromConfig(appConfig *config.AppConfig) (*GenAIProcessor, error) {
+	if appConfig == nil {
+		return nil, fmt.Errorf("appConfig cannot be nil")
+	}
+	if v := appConfig.Validate(); !v.Valid {
+		return nil, fmt.Errorf("invalid configuration: %v", v.Errors)
+	}
+
+	logger := log.New(log.Writer(), "[GenAIProcessor] ", log.LstdFlags)
+
+	// Initialize context manager
+	contextManager := contextpkg.NewContextManager()
+
+	// Build provider factory and map configs
+	factory := providers.NewProviderFactory()
+
+	// Helper to convert ModelConfig.Parameters (map[string]string) to map[string]interface{}
+	toIfaceParams := func(mc config.ModelConfig) map[string]interface{} {
+		result := map[string]interface{}{}
+		if mc.Parameters != nil {
+			for k, v := range mc.Parameters {
+				// Try to parse int
+				var intVal int
+				var floatVal float64
+				if _, err := fmt.Sscanf(v, "%d", &intVal); err == nil {
+					result[k] = intVal
+					continue
+				}
+				if _, err := fmt.Sscanf(v, "%f", &floatVal); err == nil {
+					result[k] = floatVal
+					continue
+				}
+				// fallback to string
+				result[k] = v
+			}
+		}
+		// Ensure core numeric params present from top-level too
+		if mc.MaxTokens > 0 {
+			result["max_tokens"] = mc.MaxTokens
+		}
+		if mc.Temperature >= 0 {
+			result["temperature"] = mc.Temperature
+		}
+		return result
+	}
+
+	// Register all providers (best-effort; duplicates for 'generic' may overwrite)
+	for name, mc := range appConfig.Models.Providers {
+		cfg := &types.ProviderConfig{
+			APIKey:     mc.APIKey,
+			Endpoint:   mc.Endpoint,
+			ModelName:  mc.ModelName,
+			Parameters: toIfaceParams(mc),
+		}
+
+		providerType := mapProviderType(name, mc.Provider)
+		if err := factory.RegisterProvider(providerType, cfg); err != nil {
+			// Log and continue to allow others to register
+			logger.Printf("warning: failed to register provider '%s' as '%s': %v", name, providerType, err)
+		}
+	}
+
+	// Select active provider
+	defaultKey := appConfig.Models.DefaultProvider
+	mc, ok := appConfig.Models.Providers[defaultKey]
+	if !ok {
+		return nil, fmt.Errorf("default_provider '%s' not found in providers", defaultKey)
+	}
+	activeCfg := &types.ProviderConfig{
+		APIKey:     mc.APIKey,
+		Endpoint:   mc.Endpoint,
+		ModelName:  mc.ModelName,
+		Parameters: toIfaceParams(mc),
+	}
+	providerType := mapProviderType(defaultKey, mc.Provider)
+
+	// Create concrete provider from the selected config
+	provider, err := factory.CreateProviderWithConfig(providerType, activeCfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create provider '%s': %w", providerType, err)
+	}
+
+	// Build input adapter based on config
+	var adapter interfaces.InputAdapter
+	switch mc.InputAdapter {
+	case "claude_input_adapter":
+		claude := adapters.NewClaudeInputAdapter(mc.APIKey)
+		claude.SetModelName(mc.ModelName)
+		_ = claude.SetMaxTokens(mc.MaxTokens)
+		_ = claude.SetTemperature(mc.Temperature)
+		if sys, ok := activeCfg.Parameters["system"].(string); ok && sys != "" {
+			claude.SetSystemPrompt(sys)
+		}
+		adapter = claude
+	case "openai_input_adapter":
+		openai := adapters.NewOpenAIInputAdapter(mc.APIKey)
+		openai.SetModelName(mc.ModelName)
+		_ = openai.SetMaxTokens(mc.MaxTokens)
+		_ = openai.SetTemperature(mc.Temperature)
+		if sys, ok := activeCfg.Parameters["system"].(string); ok && sys != "" {
+			openai.SetSystemPrompt(sys)
+		}
+		adapter = openai
+	default:
+		generic := adapters.NewGenericInputAdapter(mc.APIKey)
+		generic.SetModelName(mc.ModelName)
+		_ = generic.SetMaxTokens(mc.MaxTokens)
+		_ = generic.SetTemperature(mc.Temperature)
+		// Generic adapter has no SetSystemPrompt
+		adapter = generic
+	}
+
+	// Create LLM engine
+	llmEngine := engine.NewLLMEngine(provider, adapter)
+
+	// Retry parser configuration derives from model retry settings
+	retryConfig := &recovery.RetryConfig{
+		MaxRetries:          mc.RetryAttempts,
+		RetryDelay:          mc.RetryDelay,
+		ConfidenceThreshold: 0.7,
+		EnableReprompting:   true,
+		RepromptTemplate:    "The previous response was not in the expected JSON format. Please provide a valid JSON response for the following query: %s",
+	}
+	retryParser := recovery.NewRetryParser(retryConfig, llmEngine, contextManager)
+
+	// Parser preferences based on OutputParser
+	claudeExtractor := extractors.NewClaudeExtractor()
+	openaiExtractor := extractors.NewOpenAIExtractor()
+	genericExtractor := extractors.NewGenericExtractor()
+
+	switch mc.OutputParser {
+	case "claude_extractor":
+		retryParser.RegisterParser(recovery.StrategySpecific, claudeExtractor)
+	case "openai_extractor":
+		retryParser.RegisterParser(recovery.StrategySpecific, openaiExtractor)
+	default:
+		// Keep previous behavior: delegate by model type
+		specific := &multiModelParser{claude: claudeExtractor, openai: openaiExtractor}
+		retryParser.RegisterParser(recovery.StrategySpecific, specific)
+	}
+	retryParser.RegisterParser(recovery.StrategyGeneric, genericExtractor)
+
+	// Safety validator
+	safetyValidator := validator.NewSafetyValidator()
+
+	// Log prompt formatter selection for future handling
+	if mc.PromptFormatter != "" {
+		logger.Printf("prompt_formatter: %s (TODO: integrate custom formatting)", mc.PromptFormatter)
+	}
+
+	proc := &GenAIProcessor{
+		contextManager:  contextManager,
+		llmEngine:       llmEngine,
+		RetryParser:     retryParser,
+		safetyValidator: safetyValidator,
+		defaultModel:    mc.ModelName,
+		logger:          logger,
+		providerTimeout: mc.Timeout,
+		retryAttempts:   mc.RetryAttempts,
+		retryDelay:      mc.RetryDelay,
+	}
+
+	return proc, nil
+}
+
+// mapProviderType maps config provider name/key to factory provider type
+func mapProviderType(key string, providerName string) string {
+	switch key {
+	case "claude":
+		return "claude"
+	case "openai":
+		return "openai"
+	case "generic":
+		return "generic"
+	}
+	switch providerName {
+	case "anthropic":
+		return "claude"
+	case "openai":
+		return "openai"
+	default:
+		return "generic"
+	}
+}
+
 // ProcessQuery orchestrates the complete processing pipeline:
 // 1. Context resolution using ContextManager
 // 2. Input adaptation and LLM processing
@@ -153,10 +350,51 @@ func (p *GenAIProcessor) ProcessQuery(ctx context.Context, req *types.Processing
 	}
 	if ep, ok := p.llmEngine.(engineWithProvider); ok {
 		provider := ep.GetProvider()
-		rawResponse, err = provider.GenerateResponse(ctx, modelReq)
-		if err != nil {
+
+		// Apply timeout and retry logic using configuration values
+		attempts := p.retryAttempts
+		if attempts < 0 {
+			attempts = 0
+		}
+		var lastErr error
+		for attempt := 0; attempt <= attempts; attempt++ {
+			callCtx := ctx
+			if p.providerTimeout > 0 {
+				var cancel context.CancelFunc
+				callCtx, cancel = context.WithTimeout(ctx, p.providerTimeout)
+				defer cancel()
+			}
+
+			rawResponse, err = provider.GenerateResponse(callCtx, modelReq)
+			if err == nil {
+				break
+			}
+			lastErr = err
+
+			// Decide retry
+			if attempt < attempts && isTransientError(err) {
+				p.logger.Printf("Transient provider error (attempt %d/%d): %v", attempt+1, attempts+1, err)
+				td := p.retryDelay
+				if td < 0 {
+					td = 0
+				}
+				timer := time.NewTimer(td)
+				select {
+				case <-ctx.Done():
+					p.logger.Printf("Context canceled during retry wait: %v", ctx.Err())
+					return p.createErrorResponse("llm_processing_failed", ctx.Err()), nil
+				case <-timer.C:
+				}
+				continue
+			}
+
+			// Non-retryable or out of attempts
 			p.logger.Printf("Provider call failed: %v", err)
 			return p.createErrorResponse("llm_processing_failed", err), nil
+		}
+		if lastErr != nil && rawResponse == nil {
+			p.logger.Printf("Provider call failed after retries: %v", lastErr)
+			return p.createErrorResponse("llm_processing_failed", lastErr), nil
 		}
 	} else {
 		// Backward compatibility: if engine cannot send ModelRequest directly, use existing ProcessQuery
@@ -389,6 +627,32 @@ func (m *multiModelParser) CanHandle(modelType string) bool {
 func (m *multiModelParser) GetConfidence() float64 {
 	// Return a conservative default
 	return 0.8
+}
+
+// isTransientError determines whether a provider error is likely transient
+// based on common network/timeouts and HTTP semantics embedded in error text.
+func isTransientError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	// Network/timeout categories
+	transientSnippets := []string{
+		"timeout", "deadline exceeded", "temporarily unavailable", "temporary", "try again",
+		"connection reset", "connection refused", "no such host", "tls handshake timeout", "eof",
+		"rate limit", "too many requests", "429", "503", "502", "504",
+	}
+	for _, s := range transientSnippets {
+		if strings.Contains(msg, s) {
+			return true
+		}
+	}
+	// Some net errors have Timeout() bool
+	var nerr interface{ Timeout() bool }
+	if ok := errors.As(err, &nerr); ok && nerr.Timeout() {
+		return true
+	}
+	return false
 }
 
 // getSystemPrompt returns the system prompt for OpenShift audit queries

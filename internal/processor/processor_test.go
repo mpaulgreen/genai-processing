@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"genai-processing/internal/config"
 	"genai-processing/internal/parser/recovery"
 	"genai-processing/pkg/interfaces"
 	"genai-processing/pkg/types"
@@ -833,6 +834,71 @@ func TestSimpleLLMEngine(t *testing.T) {
 		t.Errorf("Expected 'claude-3-5-sonnet-20241022', got '%s'", models[0])
 	}
 }
+
+func TestNewGenAIProcessorFromConfig_ValidatesAndBuilds(t *testing.T) {
+	app := config.GetDefaultConfig()
+	// Ensure API keys present so providers pass registration
+	c := app.Models.Providers["claude"]
+	c.APIKey = "test-key"
+	app.Models.Providers["claude"] = c
+
+	p, err := NewGenAIProcessorFromConfig(app)
+	if err != nil {
+		t.Fatalf("NewGenAIProcessorFromConfig returned error: %v", err)
+	}
+	if p == nil {
+		t.Fatal("processor is nil")
+	}
+	if p.defaultModel == "" {
+		t.Error("defaultModel should be set from config")
+	}
+}
+
+func TestProcessQuery_TimeoutAndRetry(t *testing.T) {
+	// Build a processor with small timeout and one retry using mock engineWithProvider path
+	prov := &flakyProvider{fails: intPtr(1)} // first attempt fails, second succeeds
+	eng := &engineWithProvider{provider: prov}
+	processor := &GenAIProcessor{
+		contextManager:  newMockContextManager(),
+		llmEngine:       eng,
+		RetryParser:     newMockRetryParser(),
+		safetyValidator: newMockSafetyValidator(),
+		defaultModel:    "claude-3-5-sonnet-20241022",
+		providerTimeout: 50 * time.Millisecond,
+		retryAttempts:   1,
+		retryDelay:      10 * time.Millisecond,
+		logger:          log.New(log.Writer(), "[TestProcessor] ", log.LstdFlags),
+	}
+
+	req := &types.ProcessingRequest{Query: "retry please", SessionID: "sess-retry"}
+	ctx := context.Background()
+	resp, err := processor.ProcessQuery(ctx, req)
+	if err != nil {
+		t.Fatalf("ProcessQuery returned error: %v", err)
+	}
+	if resp == nil || resp.Error != "" {
+		t.Fatalf("expected success after retry, got resp=%v err=%v", resp, err)
+	}
+}
+
+// flakyProvider fails a fixed number of initial attempts, then succeeds
+type flakyProvider struct{ fails *int }
+
+func intPtr(i int) *int { return &i }
+
+func (f *flakyProvider) GenerateResponse(ctx context.Context, request *types.ModelRequest) (*types.RawResponse, error) {
+	if f.fails != nil && *f.fails > 0 {
+		*f.fails = *f.fails - 1
+		return nil, fmt.Errorf("temporary error: timeout")
+	}
+	return &types.RawResponse{Content: `{"log_source":"kube-apiserver","limit":20}`}, nil
+}
+
+func (f *flakyProvider) GetModelInfo() types.ModelInfo {
+	return types.ModelInfo{Name: "claude-3-5-sonnet-20241022", Provider: "anthropic"}
+}
+func (f *flakyProvider) SupportsStreaming() bool   { return false }
+func (f *flakyProvider) ValidateConnection() error { return nil }
 
 // mockLLMProvider implements interfaces.LLMProvider for testing
 type mockLLMProvider struct{}

@@ -162,21 +162,24 @@ func logConfigurationStatus(appConfig *config.AppConfig) {
 
 // initializeProcessor initializes the GenAI processor with configuration
 func initializeProcessor(appConfig *config.AppConfig) (*processor.GenAIProcessor, error) {
-	// For now, use the existing NewGenAIProcessor() function
-	// In the future, this should be updated to accept configuration parameters
+	// Prefer config-driven initialization; fall back to default to preserve tests
+	if appConfig != nil {
+		p, err := processor.NewGenAIProcessorFromConfig(appConfig)
+		if err == nil && p != nil {
+			log.Printf("Processor initialized from config. Default provider: %s", appConfig.Models.DefaultProvider)
+			return p, nil
+		}
+		log.Printf("Warning: config-driven processor init failed, falling back to default: %v", err)
+	}
+
 	genaiProcessor := processor.NewGenAIProcessor()
 	if genaiProcessor == nil {
 		return nil, fmt.Errorf("failed to create GenAI processor")
 	}
-
-	// TODO: Update processor initialization to use configuration
-	// This would involve:
-	// 1. Passing model configuration to LLM providers
-	// 2. Loading prompts configuration for the LLM engine
-	// 3. Configuring validation rules
-	// 4. Setting up model-specific adapters and parsers
-
-	log.Printf("Processor initialized with default model: %s", appConfig.Models.DefaultProvider)
-
+	if appConfig != nil {
+		log.Printf("Processor initialized with default model provider: %s", appConfig.Models.DefaultProvider)
+	} else {
+		log.Printf("Processor initialized with default configuration (no appConfig provided)")
+	}
 	return genaiProcessor, nil
 }
