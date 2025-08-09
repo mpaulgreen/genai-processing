@@ -26,7 +26,8 @@ func (f *ProviderFactory) RegisterProvider(providerType string, config *types.Pr
 	if config == nil {
 		return fmt.Errorf("provider config cannot be nil")
 	}
-	if config.APIKey == "" {
+	// Allow empty API key for generic providers (e.g., local/unauthenticated endpoints)
+	if config.APIKey == "" && providerType != "generic" {
 		return fmt.Errorf("API key is required for provider %s", providerType)
 	}
 
@@ -130,7 +131,8 @@ func (f *ProviderFactory) CreateProviderWithConfig(providerType string, config *
 	if config == nil {
 		return nil, fmt.Errorf("provider config cannot be nil")
 	}
-	if config.APIKey == "" {
+	// Allow empty API key for generic providers (e.g., local/unauthenticated endpoints)
+	if config.APIKey == "" && providerType != "generic" {
 		return nil, fmt.Errorf("API key is required for provider %s", providerType)
 	}
 
