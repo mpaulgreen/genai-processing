@@ -72,6 +72,9 @@ func main() {
 	log.Printf("✓ Default LLM provider: %s", appConfig.Models.DefaultProvider)
 	log.Println("✓ POST /query - Process natural language audit queries")
 	log.Println("✓ GET  /health - Health check endpoint")
+	log.Println("✓ GET  /openapi.json - OpenAPI specification")
+	log.Println("✓ GET  /docs - Swagger UI documentation")
+	log.Println("✓ GET  /redoc - ReDoc documentation")
 	log.Println("Press Ctrl+C to shutdown gracefully")
 
 	// Wait for interrupt signal to gracefully shutdown the server
