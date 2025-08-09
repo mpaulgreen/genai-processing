@@ -42,7 +42,7 @@ func TestInterfaceMethods(t *testing.T) {
 		t.Errorf("GetContext() failed: %v", err)
 	}
 	if context == nil {
-		t.Error("GetContext() returned nil context")
+		t.Fatal("GetContext() returned nil context")
 	}
 	if context.SessionID != sessionID {
 		t.Errorf("Expected SessionID %s, got %s", sessionID, context.SessionID)

@@ -25,3 +25,7 @@ server
 
 # Go workspace file
 go.work
+
+# idea
+.idea/
+./vscode

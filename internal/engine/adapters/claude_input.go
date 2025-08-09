@@ -91,28 +91,29 @@ func (c *ClaudeInputAdapter) AdaptRequest(req *types.InternalRequest) (*types.Mo
 		).WithDetails("query", req.ProcessingRequest.Query)
 	}
 
-	// Create Claude message structure
-	messages := []ClaudeMessage{
-		{
-			Role:    "user",
-			Content: formattedPrompt,
+	// Create messages in provider-agnostic format expected by Claude provider
+	msgs := []interface{}{
+		map[string]interface{}{
+			"role":    "user",
+			"content": formattedPrompt,
 		},
-	}
-
-	// Create Claude request payload
-	claudeRequest := ClaudeRequest{
-		Model:       c.ModelName,
-		Messages:    messages,
-		MaxTokens:   c.MaxTokens,
-		Temperature: c.Temperature,
-		System:      c.getSystemPromptWithFallback(),
 	}
 
 	// Convert to generic ModelRequest
 	modelRequest := &types.ModelRequest{
-		Model:      c.ModelName,
-		Messages:   []interface{}{claudeRequest},
-		Parameters: c.GetAPIParameters(),
+		Model:    c.ModelName,
+		Messages: msgs,
+		Parameters: map[string]interface{}{
+			"max_tokens":  c.MaxTokens,
+			"temperature": c.Temperature,
+			"system":      c.getSystemPromptWithFallback(),
+			// Provide headers inline to match expectations in tests comparing adapters
+			"headers": map[string]string{
+				"x-api-key":         c.APIKey,
+				"anthropic-version": "2023-06-01",
+				"content-type":      "application/json",
+			},
+		},
 	}
 
 	return modelRequest, nil

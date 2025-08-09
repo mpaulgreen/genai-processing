@@ -146,11 +146,32 @@ func (c *ClaudeProvider) GenerateResponse(ctx context.Context, request *types.Mo
 
 	// Handle error responses
 	if resp.StatusCode != http.StatusOK {
-		var claudeErr ClaudeError
-		if err := json.Unmarshal(body, &claudeErr); err != nil {
-			return nil, fmt.Errorf("HTTP %d: failed to parse error response: %s", resp.StatusCode, string(body))
+		// Anthropic errors are often nested as {"type":"error","error":{"type":"...","message":"..."}}
+		type nestedError struct {
+			Type  string `json:"type"`
+			Error struct {
+				Type    string `json:"type"`
+				Message string `json:"message"`
+			} `json:"error"`
+			Message string `json:"message"`
 		}
-		return nil, fmt.Errorf("claude API error: %s - %s", claudeErr.Type, claudeErr.Message)
+		var ne nestedError
+		if err := json.Unmarshal(body, &ne); err == nil {
+			// Prefer nested error fields when present
+			if ne.Error.Message != "" || ne.Error.Type != "" {
+				return nil, fmt.Errorf("HTTP %d: claude API error: %s - %s", resp.StatusCode, ne.Error.Type, ne.Error.Message)
+			}
+			if ne.Message != "" || ne.Type != "" {
+				return nil, fmt.Errorf("HTTP %d: claude API error: %s - %s", resp.StatusCode, ne.Type, ne.Message)
+			}
+		}
+		// Fallback to flat error
+		var ce ClaudeError
+		if err := json.Unmarshal(body, &ce); err == nil && (ce.Type != "" || ce.Message != "") {
+			return nil, fmt.Errorf("HTTP %d: claude API error: %s - %s", resp.StatusCode, ce.Type, ce.Message)
+		}
+		// Last resort: return raw body snippet
+		return nil, fmt.Errorf("HTTP %d: claude API error: %s", resp.StatusCode, string(body))
 	}
 
 	// Parse successful response

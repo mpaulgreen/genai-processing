@@ -1,6 +1,8 @@
 ## Build and start the server
 go build -o server ./cmd/server
-./server 
+go test -count=1 ./...
+set -a; source .env; set +a; ./server 
+
 ## Perform health check
 curl http://localhost:8080/health
 

@@ -124,7 +124,7 @@ func TestModelConfig_Validate(t *testing.T) {
 			config: ModelConfig{
 				Provider:        "anthropic",
 				Endpoint:        "https://api.anthropic.com/v1/messages",
-				APIKey:          "${ANTHROPIC_API_KEY:-test-key}",
+				APIKey:          "${CLAUDE_API_KEY:-test-key}",
 				ModelName:       "claude-3-5-sonnet-20241022",
 				MaxTokens:       4000,
 				Temperature:     0.1,
@@ -292,12 +292,12 @@ func TestIsValidAPIKey(t *testing.T) {
 		},
 		{
 			name:    "environment variable with fallback",
-			apiKey:  "${ANTHROPIC_API_KEY:-placeholder-key}",
+			apiKey:  "${CLAUDE_API_KEY:-placeholder-key}",
 			isValid: true,
 		},
 		{
 			name:    "simple environment variable",
-			apiKey:  "${ANTHROPIC_API_KEY}",
+			apiKey:  "${CLAUDE_API_KEY}",
 			isValid: true,
 		},
 		{
@@ -307,12 +307,12 @@ func TestIsValidAPIKey(t *testing.T) {
 		},
 		{
 			name:    "invalid placeholder format",
-			apiKey:  "${ANTHROPIC_API_KEY",
+			apiKey:  "${CLAUDE_API_KEY",
 			isValid: false,
 		},
 		{
 			name:    "invalid placeholder format 2",
-			apiKey:  "ANTHROPIC_API_KEY}",
+			apiKey:  "CLAUDE_API_KEY}",
 			isValid: false,
 		},
 	}

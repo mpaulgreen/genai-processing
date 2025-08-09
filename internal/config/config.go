@@ -422,7 +422,7 @@ func GetDefaultConfig() *AppConfig {
 				"claude": {
 					Provider:        "anthropic",
 					Endpoint:        "https://api.anthropic.com/v1/messages",
-					APIKey:          "${ANTHROPIC_API_KEY:-placeholder-key}",
+					APIKey:          "${CLAUDE_API_KEY:-placeholder-key}",
 					ModelName:       "claude-3-5-sonnet-20241022",
 					MaxTokens:       4000,
 					Temperature:     0.1,

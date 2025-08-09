@@ -79,7 +79,7 @@ func (cm *ContextManager) UpdateContext(sessionID string, query string, response
 	context.AddConversationEntry(query, response, resolvedRefs)
 
 	// Update resolved references for future pronoun resolution
-	cm.updateResolvedReferences(context, response, resolvedRefs)
+	cm.updateResolvedReferences(context, resolvedRefs)
 
 	// Enrich context with additional information
 	cm.enrichContext(context, query, response)
@@ -115,7 +115,7 @@ func (cm *ContextManager) UpdateContextWithUser(sessionID string, userID string,
 	context.AddConversationEntry(query, response, resolvedRefs)
 
 	// Update resolved references for future pronoun resolution
-	cm.updateResolvedReferences(context, response, resolvedRefs)
+	cm.updateResolvedReferences(context, resolvedRefs)
 
 	// Enrich context with additional information
 	cm.enrichContext(context, query, response)
@@ -163,7 +163,9 @@ func (cm *ContextManager) ResolvePronouns(query string, sessionID string) (strin
 	// Get session context
 	context, exists := cm.sessions[sessionID]
 	if !exists {
-		return query, fmt.Errorf("session not found: %s", sessionID)
+		// For new sessions with no prior context, return the original query without error.
+		// The session will be created later during UpdateContext.
+		return query, nil
 	}
 
 	// Resolve different types of pronouns and references
@@ -282,7 +284,7 @@ func (cm *ContextManager) extractReferencesFromResponse(response *types.Structur
 }
 
 // updateResolvedReferences updates the resolved references in the context.
-func (cm *ContextManager) updateResolvedReferences(context *types.ConversationContext, response *types.StructuredQuery, refs map[string]string) {
+func (cm *ContextManager) updateResolvedReferences(context *types.ConversationContext, refs map[string]string) {
 	for key, value := range refs {
 		if value != "" {
 			// Determine reference type based on key

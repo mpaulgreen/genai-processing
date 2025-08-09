@@ -307,8 +307,8 @@ func TestResolvePronouns_NoContext(t *testing.T) {
 	// Test pronoun resolution without any context
 	query := "When did he do it?"
 	resolved, err := cm.ResolvePronouns(query, sessionID)
-	if err == nil {
-		t.Error("Expected error for non-existent session")
+	if err != nil {
+		t.Errorf("Did not expect error for non-existent session; got: %v", err)
 	}
 
 	if resolved != query {

@@ -21,7 +21,7 @@
 #   into ints/floats automatically. For example, "4000" → 4000, "0.1" → 0.1. Keep non-numeric values as strings.
 #
 # Environment variables
-# - api_key supports env placeholders like ${ANTHROPIC_API_KEY} or ${OPENAI_API_KEY}
+# - api_key supports env placeholders like ${CLAUDE_API_KEY} or ${OPENAI_API_KEY}
 # - You may also use ${VAR_NAME:-default_value} to provide a fallback
 #
 # Provider mapping
@@ -59,7 +59,7 @@ providers:
     # endpoint: full HTTPS URL for the API; defaults exist but explicit is preferred
     endpoint: "https://api.anthropic.com/v1/messages"
     # api_key: secret or environment placeholder used by the provider client
-    api_key: "${ANTHROPIC_API_KEY}"
+    api_key: "${CLAUDE_API_KEY}"
     # model_name: default model for this provider entry
     model_name: "claude-3-5-sonnet-20241022"
     # max_tokens: cap on output tokens; also forwarded in parameters
