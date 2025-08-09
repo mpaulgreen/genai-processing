@@ -69,6 +69,9 @@ type RetryParser struct {
 
 	// maxOutputLength, when >0, enforces a maximum raw response length before parsing
 	maxOutputLength int
+
+	// optional fallback handler to create a minimal query when all strategies fail
+	fallbackHandler interfaces.FallbackHandler
 }
 
 // NewRetryParser creates a new RetryParser with the given configuration.
@@ -89,6 +92,12 @@ func NewRetryParser(config *RetryConfig, llmEngine interfaces.LLMEngine, context
 		llmEngine:      llmEngine,
 		contextManager: contextManager,
 	}
+}
+
+// SetFallbackHandler sets a handler used to create a minimal structured query
+// if all parsing attempts fail.
+func (r *RetryParser) SetFallbackHandler(h interfaces.FallbackHandler) {
+	r.fallbackHandler = h
 }
 
 // RegisterParser registers a parser for a specific retry strategy.
@@ -160,6 +169,13 @@ func (r *RetryParser) ParseWithRetry(ctx context.Context, raw *types.RawResponse
 	// If we have a best result, return it even if below threshold
 	if bestResult != nil && bestResult.Success {
 		return bestResult.Query, nil
+	}
+
+	// Use fallback handler if configured
+	if r.fallbackHandler != nil {
+		if fallback, ferr := r.fallbackHandler.CreateMinimalQuery(raw, modelType, originalQuery); ferr == nil && fallback != nil {
+			return fallback, nil
+		}
 	}
 
 	// Return the last error or create a comprehensive error

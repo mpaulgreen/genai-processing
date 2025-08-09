@@ -50,6 +50,10 @@ func (sa *StringOrArray) GetValue() interface{} {
 	return sa.value
 }
 
+// Value is exported accessor to support construction in other packages without
+// relying on struct literals. Prefer NewStringOrArray for creation.
+func (sa StringOrArray) Value() interface{} { return sa.value }
+
 // IsEmpty returns true if the value is nil or empty
 func (sa *StringOrArray) IsEmpty() bool {
 	if sa == nil {

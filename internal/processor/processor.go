@@ -14,6 +14,7 @@ import (
 	"genai-processing/internal/engine/adapters"
 	"genai-processing/internal/engine/providers"
 	"genai-processing/internal/parser/extractors"
+	norm "genai-processing/internal/parser/normalizers"
 	"genai-processing/internal/parser/recovery"
 	promptformatters "genai-processing/internal/prompts/formatters"
 	"genai-processing/internal/validator"
@@ -83,24 +84,26 @@ func NewGenAIProcessor() *GenAIProcessor {
 
 	retryParser := recovery.NewRetryParser(retryConfig, llmEngine, contextManager)
 
-	// Register parsers for different strategies
+	// Register parsers via extractor factory
 	claudeExtractor := extractors.NewClaudeExtractor()
 	openaiExtractor := extractors.NewOpenAIExtractor()
 	genericExtractor := extractors.NewGenericExtractor()
 
-	// Combine Claude and OpenAI into a single "specific" parser that selects by modelType
-	specificParser := &multiModelParser{
-		claude: claudeExtractor,
-		openai: openaiExtractor,
-	}
+	extractorFactory := extractors.NewExtractorFactory()
+	extractorFactory.Register("claude", claudeExtractor, "anthropic")
+	extractorFactory.Register("openai", openaiExtractor)
+	extractorFactory.SetGeneric(genericExtractor)
 
-	// Specific: model-specific parsing (Claude or OpenAI)
-	retryParser.RegisterParser(recovery.StrategySpecific, specificParser)
+	// Specific: delegating parser across model types
+	retryParser.RegisterParser(recovery.StrategySpecific, extractorFactory.CreateDelegatingParser())
 	// Generic: model-agnostic, regex-based JSON extraction as a universal fallback
 	retryParser.RegisterParser(recovery.StrategyGeneric, genericExtractor)
 
 	// Create safety validator
 	safetyValidator := validator.NewSafetyValidator()
+
+	// Configure fallback handler for retry parser
+	retryParser.SetFallbackHandler(recovery.NewFallbackHandler())
 
 	return NewGenAIProcessorWithDeps(
 		contextManager,
@@ -315,10 +318,15 @@ func NewGenAIProcessorFromConfig(appConfig *config.AppConfig) (*GenAIProcessor, 
 		retryParser.SetMaxOutputLength(appConfig.Prompts.Validation.MaxOutputLength)
 	}
 
-	// Parser preferences based on OutputParser
+	// Parser preferences based on OutputParser using factory
 	claudeExtractor := extractors.NewClaudeExtractor()
 	openaiExtractor := extractors.NewOpenAIExtractor()
 	genericExtractor := extractors.NewGenericExtractor()
+
+	extractorFactory := extractors.NewExtractorFactory()
+	extractorFactory.Register("claude", claudeExtractor, "anthropic")
+	extractorFactory.Register("openai", openaiExtractor)
+	extractorFactory.SetGeneric(genericExtractor)
 
 	switch mc.OutputParser {
 	case "claude_extractor":
@@ -326,14 +334,16 @@ func NewGenAIProcessorFromConfig(appConfig *config.AppConfig) (*GenAIProcessor, 
 	case "openai_extractor":
 		retryParser.RegisterParser(recovery.StrategySpecific, openaiExtractor)
 	default:
-		// Keep previous behavior: delegate by model type
-		specific := &multiModelParser{claude: claudeExtractor, openai: openaiExtractor}
-		retryParser.RegisterParser(recovery.StrategySpecific, specific)
+		// Delegate by model type via extractor factory
+		retryParser.RegisterParser(recovery.StrategySpecific, extractorFactory.CreateDelegatingParser())
 	}
 	retryParser.RegisterParser(recovery.StrategyGeneric, genericExtractor)
 
 	// Safety validator
 	safetyValidator := validator.NewSafetyValidator()
+
+	// Configure fallback handler for retry parser
+	retryParser.SetFallbackHandler(recovery.NewFallbackHandler())
 
 	// Log prompt formatter selection (now active via formatters package)
 	if mc.PromptFormatter != "" {
@@ -515,7 +525,26 @@ func (p *GenAIProcessor) ProcessQuery(ctx context.Context, req *types.Processing
 		return p.createErrorResponse("parsing_failed", err), nil
 	}
 
-	// Step 6a: Enhanced prompt validation required fields
+	// Step 6: Normalization pipeline (JSONNormalizer → FieldMapper → SchemaValidator)
+	p.logger.Printf("Normalizing structured query")
+	jsonNormalizer := norm.NewJSONNormalizer()
+	fieldMapper := norm.NewFieldMapper()
+	schemaValidator := norm.NewSchemaValidator()
+
+	if structuredQuery, err = jsonNormalizer.Normalize(structuredQuery); err != nil {
+		p.logger.Printf("Normalization (JSON) failed: %v", err)
+		return p.createErrorResponse("normalization_failed", err), nil
+	}
+	if structuredQuery, err = fieldMapper.MapFields(structuredQuery); err != nil {
+		p.logger.Printf("Normalization (FieldMapper) failed: %v", err)
+		return p.createErrorResponse("normalization_failed", err), nil
+	}
+	if err = schemaValidator.ValidateSchema(structuredQuery); err != nil {
+		p.logger.Printf("Normalization (SchemaValidator) failed: %v", err)
+		return p.createErrorResponse("normalization_failed", err), nil
+	}
+
+	// Step 7a: Enhanced prompt validation required fields
 	if sq := structuredQuery; sq != nil {
 		for _, rf := range p.promptValidation.RequiredFields {
 			switch strings.ToLower(rf) {
@@ -553,7 +582,7 @@ func (p *GenAIProcessor) ProcessQuery(ctx context.Context, req *types.Processing
 		}
 	}
 
-	// Step 6b: Safety validation
+	// Step 7b: Safety validation
 	p.logger.Printf("Validating query safety")
 	validationResult, err := p.safetyValidator.ValidateQuery(structuredQuery)
 	if err != nil {
@@ -561,7 +590,7 @@ func (p *GenAIProcessor) ProcessQuery(ctx context.Context, req *types.Processing
 		return p.createErrorResponse("validation_failed", err), nil
 	}
 
-	// Step 7: Update context with new query/response, including user identity if available
+	// Step 8: Update context with new query/response, including user identity if available
 	if userID, ok := ctx.Value(types.ContextKeyUserID).(string); ok && userID != "" {
 		_ = p.contextManager.UpdateContextWithUser(req.SessionID, userID, req.Query, structuredQuery)
 	} else {
@@ -575,7 +604,7 @@ func (p *GenAIProcessor) ProcessQuery(ctx context.Context, req *types.Processing
 	}
 	// Don't fail the entire request for context update issues
 
-	// Step 8: Create response
+	// Step 9: Create response
 	processingTime := time.Since(startTime)
 	p.logger.Printf("Query processing completed in %v", processingTime)
 
