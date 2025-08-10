@@ -1,4 +1,4 @@
-default_provider: "openai"
+default_provider: "claude"
 providers:
   claude:
     provider: "anthropic"
@@ -60,73 +60,3 @@ providers:
       system: "You are an OpenShift audit query specialist."
       max_tokens: "4000"
       temperature: "0.1"
-
-# Model capabilities and constraints
-capabilities:
-  # Maximum query length for input processing; requests longer than this should be trimmed upstream
-  max_query_length: 1000
-  
-  # Maximum response length for output processing; used to inform prompt design and validation
-  max_response_length: 2000
-  
-  # Supported log sources for OpenShift audit queries (validators may enforce these)
-  supported_log_sources:
-    - "kube-apiserver"
-    - "openshift-apiserver"
-    - "oauth-server"
-    - "oauth-apiserver"
-  
-  # Supported HTTP verbs for audit filtering
-  supported_verbs:
-    - "get"
-    - "list"
-    - "create"
-    - "update"
-    - "patch"
-    - "delete"
-  
-  # Supported Kubernetes resources (not exhaustive; common high-signal resources listed)
-  supported_resources:
-    - "pods"
-    - "services"
-    - "secrets"
-    - "configmaps"
-    - "namespaces"
-    - "deployments"
-    - "customresourcedefinitions"
-    - "clusterroles"
-    - "clusterrolebindings"
-    - "rolebindings"
-    - "serviceaccounts"
-    - "persistentvolumeclaims"
-    - "networkpolicies"
-    - "validatingwebhookconfigurations"
-    - "mutatingwebhookconfigurations"
-
-# Safety and validation settings
-safety:
-  # Forbidden patterns that should be rejected by validators and/or prompts
-  forbidden_patterns:
-    - "rm -rf"
-    - "delete --all"
-    - "system:admin"
-    - "drop database"
-    - "format c:"
-    - "shutdown"
-    - "reboot"
-  
-  # Timeframe limits for audit queries; guardrails for unbounded data scans
-  timeframe_limits:
-    max_days_back: 90
-    default_limit: 20
-    max_limit: 1000
-  
-  # Required fields for valid audit queries; parsers should aim to produce these
-  required_fields:
-    - "log_source"
-  
-  # User patterns to exclude by default; reduces noise from system identities
-  default_exclude_users:
-    - "system:"
-    - "kube-"
-    - "openshift-"
