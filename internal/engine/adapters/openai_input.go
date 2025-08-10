@@ -1,7 +1,10 @@
 package adapters
 
 import (
+	"encoding/json"
 	"fmt"
+	"log"
+	"os"
 	"strings"
 	"time"
 
@@ -78,51 +81,92 @@ func (o *OpenAIInputAdapter) AdaptRequest(req *types.InternalRequest) (*types.Mo
 		)
 	}
 
-	// Format the prompt with system/user message format and examples
-	formattedPrompt, err := o.FormatPrompt(req.ProcessingRequest.Query, o.examples)
-	if err != nil {
-		return nil, errors.NewInputAdapterError(
-			fmt.Sprintf("failed to format prompt: %v", err),
-			errors.ComponentInputAdapter,
-			"openai",
-			"openai_input_adapter",
-			true,
-		).WithDetails("query", req.ProcessingRequest.Query)
+	// Use formatter from prompts.yaml if available, otherwise fall back to direct construction
+	var systemContent, userContent string
+
+	if o.formatter != nil {
+		// Use the configured formatter from prompts.yaml
+		// The formatter will handle the system_message and user_message templates
+		formattedPrompt, err := o.formatter.FormatComplete(o.SystemPrompt, o.examples, req.ProcessingRequest.Query)
+		if err != nil {
+			return nil, errors.NewInputAdapterError(
+				fmt.Sprintf("failed to format prompt: %v", err),
+				errors.ComponentInputAdapter,
+				"openai",
+				"openai_input_adapter",
+				true,
+			).WithDetails("query", req.ProcessingRequest.Query)
+		}
+
+		// For OpenAI, we need to split into system and user messages
+		// The formatter returns the complete formatted prompt, so we'll use it as user message
+		// and build a minimal system message
+		systemContent = o.getSystemPromptWithFallback()
+		userContent = formattedPrompt
+	} else {
+		// Fallback to direct construction (for backward compatibility)
+		systemContent = o.buildSystemMessage(o.examples)
+		userContent = fmt.Sprintf("Query: %s\n\nJSON:", req.ProcessingRequest.Query)
 	}
 
-	// Create OpenAI message structure with system and user messages
-	messages := []OpenAIMessage{
-		{
-			Role:    "system",
-			Content: o.getSystemPromptWithFallback(),
-		},
-		{
-			Role:    "user",
-			Content: formattedPrompt,
-		},
+	// Log prompts if enabled - for temporary debugging
+	if os.Getenv("LOG_PROMPTS") == "true" || os.Getenv("LOG_PROMPTS") == "1" {
+		log.Printf("[PromptDebug][openai] System prompt:\n%s", systemContent)
+		log.Printf("[PromptDebug][openai] User prompt:\n%s", userContent)
 	}
 
-	// Create OpenAI request payload
-	openAIRequest := OpenAIRequest{
-		Model:       o.ModelName,
-		Messages:    messages,
-		MaxTokens:   o.MaxTokens,
-		Temperature: o.Temperature,
-	}
-
-	// Convert to generic ModelRequest
+	// Convert to generic ModelRequest with role/content messages expected by provider
 	modelRequest := &types.ModelRequest{
-		Model:      o.ModelName,
-		Messages:   []interface{}{openAIRequest},
+		Model: o.ModelName,
+		Messages: []interface{}{
+			map[string]interface{}{
+				"role":    "system",
+				"content": systemContent,
+			},
+			map[string]interface{}{
+				"role":    "user",
+				"content": userContent,
+			},
+		},
 		Parameters: o.GetAPIParameters(),
+	}
+
+	// Log complete raw message if enabled
+	if os.Getenv("LOG_PROMPTS") == "true" || os.Getenv("LOG_PROMPTS") == "1" {
+		// Create a clean version of the request for logging (without sensitive data)
+		logRequest := map[string]interface{}{
+			"model": o.ModelName,
+			"messages": []map[string]interface{}{
+				{
+					"role":    "system",
+					"content": systemContent,
+				},
+				{
+					"role":    "user",
+					"content": userContent,
+				},
+			},
+			"parameters": map[string]interface{}{
+				"max_tokens":  o.MaxTokens,
+				"temperature": o.Temperature,
+				"provider":    "openai",
+			},
+		}
+
+		// Convert to JSON for pretty logging
+		if jsonData, err := json.MarshalIndent(logRequest, "", "  "); err == nil {
+			log.Printf("[PromptDebug][openai] Complete raw message sent to OpenAI:\n%s", string(jsonData))
+		} else {
+			log.Printf("[PromptDebug][openai] Complete raw message sent to OpenAI (fallback):\nModel: %s\nMessages: %+v\nParameters: %+v",
+				o.ModelName, modelRequest.Messages, logRequest["parameters"])
+		}
 	}
 
 	return modelRequest, nil
 }
 
 // FormatPrompt formats a prompt string with examples using system/user message format.
-// This method handles OpenAI-specific prompt formatting, including system prompt
-// integration, few-shot example formatting, and user message structure.
+// This method is now simplified since the main formatting is handled in AdaptRequest.
 func (o *OpenAIInputAdapter) FormatPrompt(prompt string, examples []types.Example) (string, error) {
 	if strings.TrimSpace(prompt) == "" {
 		return "", errors.NewInputAdapterError(
@@ -134,31 +178,8 @@ func (o *OpenAIInputAdapter) FormatPrompt(prompt string, examples []types.Exampl
 		)
 	}
 
-	// Prefer formatter when available
-	if o.formatter != nil {
-		return o.formatter.FormatComplete(o.SystemPrompt, examples, prompt)
-	}
-
-	// Build system/user message format
-	var builder strings.Builder
-
-	// Add examples to the user message if provided
-	if len(examples) > 0 {
-		builder.WriteString("Examples:\n\n")
-		for i, example := range examples {
-			if i > 0 {
-				builder.WriteString("\n")
-			}
-			builder.WriteString(fmt.Sprintf("Input: %s\n", example.Input))
-			builder.WriteString(fmt.Sprintf("Output: %s\n", example.Output))
-		}
-		builder.WriteString("\n")
-	}
-
-	// Add the main query
-	builder.WriteString(fmt.Sprintf("Convert this query to JSON: %s", prompt))
-
-	return builder.String(), nil
+	// Simple fallback format for backward compatibility
+	return fmt.Sprintf("Query: %s\n\nJSON:", prompt), nil
 }
 
 // GetAPIParameters returns OpenAI-specific API parameters and configuration.
@@ -305,6 +326,34 @@ func (o *OpenAIInputAdapter) getSystemPromptWithFallback() string {
 		return o.SystemPrompt
 	}
 	return "You are an OpenShift audit query specialist. Convert natural language queries into structured JSON parameters for audit log analysis.\n\nAlways respond with valid JSON only. Do not include any markdown formatting, explanations, or additional text outside the JSON structure."
+}
+
+// buildSystemMessage constructs a concise system message tailored for OpenAI models
+// with strict JSON-only instructions and embedded few-shot examples.
+func (o *OpenAIInputAdapter) buildSystemMessage(examples []types.Example) string {
+	var b strings.Builder
+	base := o.getSystemPromptWithFallback()
+	if strings.TrimSpace(base) == "" {
+		base = "You are an OpenShift audit query specialist. Convert natural language queries into structured JSON parameters for audit log analysis."
+	}
+	b.WriteString(base)
+	b.WriteString("\n\nCRITICAL: Respond with ONLY valid JSON. No explanations, no markdown, no code fences, no additional text.\n")
+	// Embed a few compact examples to bias output
+	if len(examples) > 0 {
+		b.WriteString("\nExamples:\n")
+		for i, ex := range examples {
+			if i >= 3 { // keep concise
+				break
+			}
+			b.WriteString("Query: ")
+			b.WriteString(strings.TrimSpace(ex.Input))
+			b.WriteString("\n")
+			// Use the provided example output directly (already JSON in config)
+			b.WriteString(strings.TrimSpace(ex.Output))
+			b.WriteString("\n\n")
+		}
+	}
+	return b.String()
 }
 
 // Ensure OpenAIInputAdapter implements the InputAdapter interface

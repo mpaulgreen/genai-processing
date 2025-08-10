@@ -59,8 +59,8 @@ func TestOpenAIInputAdapter_AdaptRequest(t *testing.T) {
 		t.Errorf("Expected model gpt-4, got %s", modelRequest.Model)
 	}
 
-	if len(modelRequest.Messages) != 1 {
-		t.Errorf("Expected 1 message, got %d", len(modelRequest.Messages))
+	if len(modelRequest.Messages) != 2 {
+		t.Errorf("Expected 2 messages (system + user), got %d", len(modelRequest.Messages))
 	}
 
 	// Test with nil request
@@ -91,16 +91,20 @@ func TestOpenAIInputAdapter_FormatPrompt(t *testing.T) {
 		t.Fatalf("Expected no error, got %v", err)
 	}
 
-	// Check for system/user message format
-	if !contains(formatted, "Convert this query to JSON:") {
-		t.Error("Expected 'Convert this query to JSON:' in formatted prompt")
+	// Check for simplified format (FormatPrompt is now a fallback method)
+	if !contains(formatted, "Query:") {
+		t.Error("Expected 'Query:' in formatted prompt")
+	}
+
+	if !contains(formatted, "JSON:") {
+		t.Error("Expected 'JSON:' in formatted prompt")
 	}
 
 	if !contains(formatted, prompt) {
 		t.Error("Expected original prompt in formatted output")
 	}
 
-	// Test with examples
+	// Test with examples (FormatPrompt no longer includes examples - they're handled by formatter)
 	examples = []types.Example{
 		{
 			Input:  "Who deleted the customer CRD?",
@@ -113,16 +117,14 @@ func TestOpenAIInputAdapter_FormatPrompt(t *testing.T) {
 		t.Fatalf("Expected no error, got %v", err)
 	}
 
-	if !contains(formatted, "Examples:") {
-		t.Error("Expected 'Examples:' when examples are provided")
+	// FormatPrompt is simplified and doesn't include examples anymore
+	// Examples are handled by the formatter in AdaptRequest
+	if !contains(formatted, "Query:") {
+		t.Error("Expected 'Query:' in formatted prompt")
 	}
 
-	if !contains(formatted, "Input: Who deleted the customer CRD?") {
-		t.Error("Expected example input in formatted prompt")
-	}
-
-	if !contains(formatted, `Output: {"log_source": "kube-apiserver", "verb": "delete", "resource": "customresourcedefinitions"}`) {
-		t.Error("Expected example output in formatted prompt")
+	if !contains(formatted, "JSON:") {
+		t.Error("Expected 'JSON:' in formatted prompt")
 	}
 
 	// Test with empty prompt
@@ -548,4 +550,77 @@ func TestOpenAIvsClaudeAdapter(t *testing.T) {
 	if claudeHeaders["x-api-key"] == "" {
 		t.Error("Claude should use x-api-key authentication")
 	}
+}
+
+func TestOpenAIInputAdapter_AdaptRequest_WithFormatter(t *testing.T) {
+	// Create a mock formatter that returns a predictable output
+	mockFormatter := &mockPromptFormatter{
+		formatCompleteFunc: func(systemPrompt string, examples []types.Example, query string) (string, error) {
+			return "Query: " + query + "\n\nJSON:", nil
+		},
+	}
+
+	adapter := NewOpenAIInputAdapter("test-api-key")
+	adapter.SetFormatter(mockFormatter)
+	adapter.SetSystemPrompt("You are an OpenShift audit query specialist.")
+
+	req := &types.InternalRequest{
+		ProcessingRequest: types.ProcessingRequest{
+			Query:     "Who deleted the customer CRD yesterday?",
+			SessionID: "test-session",
+		},
+	}
+
+	modelRequest, err := adapter.AdaptRequest(req)
+	if err != nil {
+		t.Fatalf("AdaptRequest failed: %v", err)
+	}
+
+	if modelRequest == nil {
+		t.Fatal("ModelRequest is nil")
+	}
+
+	if len(modelRequest.Messages) != 2 {
+		t.Fatalf("Expected 2 messages, got %d", len(modelRequest.Messages))
+	}
+
+	// Check system message
+	systemMsg, ok := modelRequest.Messages[0].(map[string]interface{})
+	if !ok {
+		t.Fatal("System message is not a map")
+	}
+	if systemMsg["role"] != "system" {
+		t.Errorf("Expected system role, got %s", systemMsg["role"])
+	}
+
+	// Check user message
+	userMsg, ok := modelRequest.Messages[1].(map[string]interface{})
+	if !ok {
+		t.Fatal("User message is not a map")
+	}
+	if userMsg["role"] != "user" {
+		t.Errorf("Expected user role, got %s", userMsg["role"])
+	}
+
+	expectedContent := "Query: Who deleted the customer CRD yesterday?\n\nJSON:"
+	if userMsg["content"] != expectedContent {
+		t.Errorf("Expected content '%s', got '%s'", expectedContent, userMsg["content"])
+	}
+}
+
+// Mock formatter for testing
+type mockPromptFormatter struct {
+	formatCompleteFunc func(systemPrompt string, examples []types.Example, query string) (string, error)
+}
+
+func (m *mockPromptFormatter) FormatSystemPrompt(systemPrompt string) (string, error) {
+	return systemPrompt, nil
+}
+
+func (m *mockPromptFormatter) FormatExamples(examples []types.Example) (string, error) {
+	return "", nil
+}
+
+func (m *mockPromptFormatter) FormatComplete(systemPrompt string, examples []types.Example, query string) (string, error) {
+	return m.formatCompleteFunc(systemPrompt, examples, query)
 }

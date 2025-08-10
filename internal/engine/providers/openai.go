@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"genai-processing/pkg/types"
@@ -37,6 +38,9 @@ type OpenAIRequest struct {
 	FrequencyPenalty float64         `json:"frequency_penalty,omitempty"`
 	PresencePenalty  float64         `json:"presence_penalty,omitempty"`
 	Stream           bool            `json:"stream,omitempty"`
+	ResponseFormat   *struct {
+		Type string `json:"type"`
+	} `json:"response_format,omitempty"`
 }
 
 // OpenAIResponse represents the response from OpenAI API
@@ -152,6 +156,23 @@ func (o *OpenAIProvider) GenerateResponse(ctx context.Context, request *types.Mo
 		if stream, ok := o.Parameters["stream"].(bool); ok {
 			openaiReq.Stream = stream
 		}
+		// response_format may be provided as string ("json_object") or map with {type}
+		if rf, ok := o.Parameters["response_format"]; ok {
+			switch v := rf.(type) {
+			case string:
+				if v != "" {
+					openaiReq.ResponseFormat = &struct {
+						Type string `json:"type"`
+					}{Type: v}
+				}
+			case map[string]interface{}:
+				if t, ok := v["type"].(string); ok && t != "" {
+					openaiReq.ResponseFormat = &struct {
+						Type string `json:"type"`
+					}{Type: t}
+				}
+			}
+		}
 	}
 
 	// Override with request-specific parameters
@@ -174,6 +195,22 @@ func (o *OpenAIProvider) GenerateResponse(ctx context.Context, request *types.Mo
 		if stream, ok := request.Parameters["stream"].(bool); ok {
 			openaiReq.Stream = stream
 		}
+		if rf, ok := request.Parameters["response_format"]; ok {
+			switch v := rf.(type) {
+			case string:
+				if v != "" {
+					openaiReq.ResponseFormat = &struct {
+						Type string `json:"type"`
+					}{Type: v}
+				}
+			case map[string]interface{}:
+				if t, ok := v["type"].(string); ok && t != "" {
+					openaiReq.ResponseFormat = &struct {
+						Type string `json:"type"`
+					}{Type: t}
+				}
+			}
+		}
 	}
 
 	// Convert messages to OpenAI format
@@ -186,6 +223,11 @@ func (o *OpenAIProvider) GenerateResponse(ctx context.Context, request *types.Mo
 				Content: content,
 			})
 		}
+	}
+
+	// If model does not support response_format json_object, drop it to avoid API errors
+	if openaiReq.ResponseFormat != nil && !supportsJSONMode(modelName) {
+		openaiReq.ResponseFormat = nil
 	}
 
 	// Prepare the HTTP request
@@ -277,6 +319,25 @@ func (o *OpenAIProvider) GenerateResponse(ctx context.Context, request *types.Mo
 			},
 		},
 	}, nil
+}
+
+// supportsJSONMode returns true if the model supports response_format {type:"json_object"}
+// based on OpenAI's documented JSON mode support.
+func supportsJSONMode(model string) bool {
+	m := model
+	// normalize to lowercase for contains checks
+	// note: model names can include versions/suffixes
+	mLower := strings.ToLower(m)
+	switch {
+	case strings.Contains(mLower, "gpt-4o"),
+		strings.Contains(mLower, "gpt-4.1"),
+		strings.Contains(mLower, "gpt-4o-mini"),
+		strings.Contains(mLower, "4o-mini"),
+		strings.Contains(mLower, "o-mini"):
+		return true
+	default:
+		return false
+	}
 }
 
 // GetModelInfo implements the LLMProvider interface

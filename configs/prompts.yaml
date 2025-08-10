@@ -263,17 +263,29 @@ formats:
       
       JSON Response:
 
-  # OpenAI format with system/user messages
+  # OpenAI format with optimized system/user message structure
+  # Clean, XML-free format optimized for OpenAI models
   openai:
     template: |
-      System: {system_prompt}
+      {system_prompt}
       
       Examples:
       {examples}
       
-      User: Convert this query to JSON: {query}
-    system_message: "{system_prompt}\n\nExamples:\n{examples}"
-    user_message: "Convert this query to JSON: {query}"
+      Query: {query}
+      
+      JSON:
+    system_message: |
+      You are an OpenShift audit query specialist. Convert natural language queries into structured JSON parameters for audit log analysis.
+      
+      CRITICAL: Respond with ONLY valid JSON. No explanations, no markdown, no code fences, no additional text.
+    user_message: |
+      Examples:
+      {examples}
+      
+      Query: {query}
+      
+      JSON:
 
   # Generic format for local models
   generic:
