@@ -211,6 +211,9 @@ func NewGenAIProcessorFromConfig(appConfig *config.AppConfig) (*GenAIProcessor, 
 			case "openai":
 				key = "openai_specific"
 				sys = appConfig.Prompts.SystemPrompts[key]
+			case "ollama":
+				key = "generic_specific"
+				sys = appConfig.Prompts.SystemPrompts[key]
 			case "generic":
 				key = "generic_specific"
 				sys = appConfig.Prompts.SystemPrompts[key]
@@ -293,7 +296,7 @@ func NewGenAIProcessorFromConfig(appConfig *config.AppConfig) (*GenAIProcessor, 
 		if sys, ok := activeCfg.Parameters["system"].(string); ok && sys != "" {
 			ollama.SetSystemPrompt(sys)
 			logger.Printf("system prompt: override from models.yaml parameters.system for provider ollama")
-		} else if sp, key := chooseSystemPrompt("generic"); sp != "" {
+		} else if sp, key := chooseSystemPrompt("ollama"); sp != "" {
 			ollama.SetSystemPrompt(sp)
 			logger.Printf("system prompt: selected '%s' for provider ollama", key)
 		}
