@@ -854,6 +854,99 @@ func TestNewGenAIProcessorFromConfig_ValidatesAndBuilds(t *testing.T) {
 	}
 }
 
+func TestNewGenAIProcessorFromConfig_OllamaIntegration(t *testing.T) {
+	appConfig := config.GetDefaultConfig()
+
+	// Override with Ollama configuration
+	appConfig.Models.DefaultProvider = "local_llama"
+	appConfig.Models.Providers["local_llama"] = config.ModelConfig{
+		Provider:        "ollama",
+		APIKey:          "",
+		Endpoint:        "http://localhost:11434/api/generate",
+		ModelName:       "llama3.1:8b",
+		MaxTokens:       4000,
+		Temperature:     0.1,
+		Timeout:         60 * time.Second,
+		RetryAttempts:   3,
+		RetryDelay:      1 * time.Second,
+		InputAdapter:    "ollama_input_adapter",
+		OutputParser:    "ollama_extractor",
+		PromptFormatter: "generic",
+		Parameters: map[string]string{
+			"system":      "You are an OpenShift audit query specialist.",
+			"max_tokens":  "4000",
+			"temperature": "0.1",
+			"top_p":       "0.9",
+			"top_k":       "40",
+		},
+	}
+
+	processor, err := NewGenAIProcessorFromConfig(appConfig)
+	if err != nil {
+		t.Fatalf("Failed to create processor with Ollama config: %v", err)
+	}
+
+	if processor == nil {
+		t.Fatal("Processor should not be nil")
+	}
+
+	if processor.defaultModel != "llama3.1:8b" {
+		t.Errorf("Expected default model 'llama3.1:8b', got '%s'", processor.defaultModel)
+	}
+}
+
+func TestNewGenAIProcessorFromConfig_MixedProviders(t *testing.T) {
+	appConfig := config.GetDefaultConfig()
+
+	// Override with mixed providers configuration
+	appConfig.Models.DefaultProvider = "openai"
+
+	// Add OpenAI provider
+	appConfig.Models.Providers["openai"] = config.ModelConfig{
+		Provider:        "openai",
+		APIKey:          "test-openai-key",
+		Endpoint:        "https://api.openai.com/v1",
+		ModelName:       "gpt-4",
+		MaxTokens:       4000,
+		Temperature:     0.1,
+		Timeout:         30 * time.Second,
+		RetryAttempts:   3,
+		RetryDelay:      1 * time.Second,
+		InputAdapter:    "openai_input_adapter",
+		OutputParser:    "openai_extractor",
+		PromptFormatter: "openai",
+	}
+
+	// Add Ollama provider
+	appConfig.Models.Providers["local_llama"] = config.ModelConfig{
+		Provider:        "ollama",
+		APIKey:          "",
+		Endpoint:        "http://localhost:11434/api/generate",
+		ModelName:       "llama3.1:8b",
+		MaxTokens:       4000,
+		Temperature:     0.1,
+		Timeout:         60 * time.Second,
+		RetryAttempts:   3,
+		RetryDelay:      1 * time.Second,
+		InputAdapter:    "ollama_input_adapter",
+		OutputParser:    "ollama_extractor",
+		PromptFormatter: "generic",
+	}
+
+	processor, err := NewGenAIProcessorFromConfig(appConfig)
+	if err != nil {
+		t.Fatalf("Failed to create processor with mixed providers: %v", err)
+	}
+
+	if processor == nil {
+		t.Fatal("Processor should not be nil")
+	}
+
+	if processor.defaultModel != "gpt-4" {
+		t.Errorf("Expected default model 'gpt-4', got '%s'", processor.defaultModel)
+	}
+}
+
 func TestProcessQuery_TimeoutAndRetry(t *testing.T) {
 	// Build a processor with small timeout and one retry using mock engineWithProvider path
 	prov := &flakyProvider{fails: intPtr(1)} // first attempt fails, second succeeds

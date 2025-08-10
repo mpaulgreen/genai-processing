@@ -87,11 +87,13 @@ func NewGenAIProcessor() *GenAIProcessor {
 	// Register parsers via extractor factory
 	claudeExtractor := extractors.NewClaudeExtractor()
 	openaiExtractor := extractors.NewOpenAIExtractor()
+	ollamaExtractor := extractors.NewOllamaExtractor()
 	genericExtractor := extractors.NewGenericExtractor()
 
 	extractorFactory := extractors.NewExtractorFactory()
 	extractorFactory.Register("claude", claudeExtractor, "anthropic")
 	extractorFactory.Register("openai", openaiExtractor)
+	extractorFactory.Register("ollama", ollamaExtractor, "llama", "llama3", "llama2", "local_llama")
 	extractorFactory.SetGeneric(genericExtractor)
 
 	// Specific: delegating parser across model types
@@ -283,6 +285,21 @@ func NewGenAIProcessorFromConfig(appConfig *config.AppConfig) (*GenAIProcessor, 
 		openai.SetExamples(appConfig.Prompts.Examples)
 		openai.SetFormatter(makeFormatter("openai", mc.PromptFormatter))
 		adapter = openai
+	case "ollama_input_adapter":
+		ollama := adapters.NewOllamaInputAdapter(mc.APIKey)
+		ollama.SetModelName(mc.ModelName)
+		_ = ollama.SetMaxTokens(mc.MaxTokens)
+		_ = ollama.SetTemperature(mc.Temperature)
+		if sys, ok := activeCfg.Parameters["system"].(string); ok && sys != "" {
+			ollama.SetSystemPrompt(sys)
+			logger.Printf("system prompt: override from models.yaml parameters.system for provider ollama")
+		} else if sp, key := chooseSystemPrompt("generic"); sp != "" {
+			ollama.SetSystemPrompt(sp)
+			logger.Printf("system prompt: selected '%s' for provider ollama", key)
+		}
+		ollama.SetExamples(appConfig.Prompts.Examples)
+		ollama.SetFormatter(makeFormatter("generic", mc.PromptFormatter))
+		adapter = ollama
 	default:
 		generic := adapters.NewGenericInputAdapter(mc.APIKey)
 		generic.SetModelName(mc.ModelName)
@@ -321,11 +338,13 @@ func NewGenAIProcessorFromConfig(appConfig *config.AppConfig) (*GenAIProcessor, 
 	// Parser preferences based on OutputParser using factory
 	claudeExtractor := extractors.NewClaudeExtractor()
 	openaiExtractor := extractors.NewOpenAIExtractor()
+	ollamaExtractor := extractors.NewOllamaExtractor()
 	genericExtractor := extractors.NewGenericExtractor()
 
 	extractorFactory := extractors.NewExtractorFactory()
 	extractorFactory.Register("claude", claudeExtractor, "anthropic")
 	extractorFactory.Register("openai", openaiExtractor)
+	extractorFactory.Register("ollama", ollamaExtractor, "llama", "llama3", "llama2", "local_llama")
 	extractorFactory.SetGeneric(genericExtractor)
 
 	switch mc.OutputParser {
@@ -333,6 +352,8 @@ func NewGenAIProcessorFromConfig(appConfig *config.AppConfig) (*GenAIProcessor, 
 		retryParser.RegisterParser(recovery.StrategySpecific, claudeExtractor)
 	case "openai_extractor":
 		retryParser.RegisterParser(recovery.StrategySpecific, openaiExtractor)
+	case "ollama_extractor":
+		retryParser.RegisterParser(recovery.StrategySpecific, ollamaExtractor)
 	default:
 		// Delegate by model type via extractor factory
 		retryParser.RegisterParser(recovery.StrategySpecific, extractorFactory.CreateDelegatingParser())
@@ -373,6 +394,8 @@ func mapProviderType(key string, providerName string) string {
 		return "claude"
 	case "openai":
 		return "openai"
+	case "ollama":
+		return "ollama"
 	case "generic":
 		return "generic"
 	}
@@ -381,6 +404,8 @@ func mapProviderType(key string, providerName string) string {
 		return "claude"
 	case "openai":
 		return "openai"
+	case "ollama":
+		return "ollama"
 	default:
 		return "generic"
 	}

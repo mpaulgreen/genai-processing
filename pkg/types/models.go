@@ -128,3 +128,33 @@ type Example struct {
 	// Metadata contains additional metadata about this example
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
 }
+
+// OllamaRequest represents Ollama's API request format
+type OllamaRequest struct {
+	Model     string                 `json:"model"`
+	Prompt    string                 `json:"prompt"`
+	Stream    bool                   `json:"stream"`
+	Options   map[string]interface{} `json:"options,omitempty"`
+	Format    string                 `json:"format,omitempty"`
+	KeepAlive string                 `json:"keep_alive,omitempty"`
+}
+
+// OllamaResponse models Ollama's API response format
+type OllamaResponse struct {
+	Model              string `json:"model"`
+	CreatedAt          string `json:"created_at"`
+	Response           string `json:"response"`
+	Done               bool   `json:"done"`
+	Context            []int  `json:"context,omitempty"`
+	TotalDuration      int64  `json:"total_duration"`
+	LoadDuration       int64  `json:"load_duration"`
+	PromptEvalCount    int    `json:"prompt_eval_count"`
+	PromptEvalDuration int64  `json:"prompt_eval_duration"`
+	EvalCount          int    `json:"eval_count"`
+	EvalDuration       int64  `json:"eval_duration"`
+}
+
+// OllamaAPIError represents Ollama's error response format
+type OllamaAPIError struct {
+	Error string `json:"error"`
+}

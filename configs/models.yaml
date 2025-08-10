@@ -1,4 +1,4 @@
-default_provider: "openai"
+default_provider: "local_llama"
 providers:
   claude:
     provider: "anthropic"
@@ -44,9 +44,9 @@ providers:
 
   # Local Llama 3.1 - For offline/air-gapped environments
   local_llama:
-    provider: "ollama"          # Non-Anthropic/OpenAI -> uses Generic provider path
-    endpoint: "http://localhost:11434"
-    api_key: ""                 # Often empty for local models
+    provider: "ollama"          # Ollama-specific provider
+    endpoint: "http://localhost:11434/api/generate"
+    api_key: ""                 # No API key needed for local models
     model_name: "llama3.1:8b"
     max_tokens: 4000
     temperature: 0.1
@@ -54,7 +54,7 @@ providers:
     retry_attempts: 3
     retry_delay: "1s"
     input_adapter: "ollama_input_adapter"
-    output_parser: "generic_extractor"
+    output_parser: "ollama_extractor"
     prompt_formatter: "generic"
     parameters:
       system: "You are an OpenShift audit query specialist."
@@ -62,46 +62,6 @@ providers:
       temperature: "0.1"
       top_p: "0.9"
       top_k: "40"
-
-  # Mistral 7B - Alternative local model
-  local_mistral:
-    provider: "ollama"
-    endpoint: "http://localhost:11434"
-    api_key: ""
-    model_name: "mistral:7b"
-    max_tokens: 4000
-    temperature: 0.1
-    timeout: "60s"
-    retry_attempts: 3
-    retry_delay: "1s"
-    input_adapter: "ollama_input_adapter"
-    output_parser: "generic_extractor"
-    prompt_formatter: "generic"
-    parameters:
-      system: "You are an OpenShift audit query specialist."
-      max_tokens: "4000"
-      temperature: "0.1"
-      top_p: "0.9"
-      top_k: "40"
-
-  # User-provided model - For custom/enterprise models
-  user_model:
-    provider: "generic"         # Use this for custom or enterprise gateways
-    endpoint: "http://localhost:8080"
-    api_key: ""
-    model_name: "custom-model"
-    max_tokens: 4000
-    temperature: 0.1
-    timeout: "60s"
-    retry_attempts: 3
-    retry_delay: "1s"
-    input_adapter: "generic_input_adapter"
-    output_parser: "generic_extractor"
-    prompt_formatter: "generic_formatter"
-    parameters:
-      system: "You are an OpenShift audit query specialist."
-      max_tokens: "4000"
-      temperature: "0.1"
 
 # Model capabilities and constraints
 capabilities:

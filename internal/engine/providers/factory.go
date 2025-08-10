@@ -26,8 +26,8 @@ func (f *ProviderFactory) RegisterProvider(providerType string, config *types.Pr
 	if config == nil {
 		return fmt.Errorf("provider config cannot be nil")
 	}
-	// Allow empty API key for generic providers (e.g., local/unauthenticated endpoints)
-	if config.APIKey == "" && providerType != "generic" {
+	// Allow empty API key for generic and ollama providers (e.g., local/unauthenticated endpoints)
+	if config.APIKey == "" && providerType != "generic" && providerType != "ollama" {
 		return fmt.Errorf("API key is required for provider %s", providerType)
 	}
 
@@ -61,6 +61,14 @@ func (f *ProviderFactory) CreateProvider(modelType string) (interfaces.LLMProvid
 			}
 		}
 		return NewGenericProvider(config.APIKey, config.Endpoint, config.ModelName, headers, config.Parameters), nil
+	case "ollama":
+		var headers map[string]string
+		if config.Parameters != nil {
+			if h, ok := config.Parameters["headers"].(map[string]string); ok {
+				headers = h
+			}
+		}
+		return NewOllamaProvider(config.APIKey, config.Endpoint, config.ModelName, headers, config.Parameters), nil
 	default:
 		return nil, fmt.Errorf("unsupported provider type: %s", modelType)
 	}
@@ -68,7 +76,7 @@ func (f *ProviderFactory) CreateProvider(modelType string) (interfaces.LLMProvid
 
 // GetSupportedProviders returns a list of all supported provider types
 func (f *ProviderFactory) GetSupportedProviders() []string {
-	supported := []string{"claude", "openai", "generic"}
+	supported := []string{"claude", "openai", "generic", "ollama"}
 
 	// Return intersection of supported and registered providers
 	result := make([]string, 0)
@@ -102,7 +110,7 @@ func (f *ProviderFactory) ValidateProvider(providerType string) error {
 	}
 
 	// Check if provider type is supported
-	supported := []string{"claude", "openai", "generic"}
+	supported := []string{"claude", "openai", "generic", "ollama"}
 	isSupported := false
 	for _, supportedType := range supported {
 		if providerType == supportedType {
@@ -131,8 +139,8 @@ func (f *ProviderFactory) CreateProviderWithConfig(providerType string, config *
 	if config == nil {
 		return nil, fmt.Errorf("provider config cannot be nil")
 	}
-	// Allow empty API key for generic providers (e.g., local/unauthenticated endpoints)
-	if config.APIKey == "" && providerType != "generic" {
+	// Allow empty API key for generic and ollama providers (e.g., local/unauthenticated endpoints)
+	if config.APIKey == "" && providerType != "generic" && providerType != "ollama" {
 		return nil, fmt.Errorf("API key is required for provider %s", providerType)
 	}
 
@@ -150,6 +158,14 @@ func (f *ProviderFactory) CreateProviderWithConfig(providerType string, config *
 			}
 		}
 		return NewGenericProvider(config.APIKey, config.Endpoint, config.ModelName, headers, config.Parameters), nil
+	case "ollama":
+		var headers map[string]string
+		if config.Parameters != nil {
+			if h, ok := config.Parameters["headers"].(map[string]string); ok {
+				headers = h
+			}
+		}
+		return NewOllamaProvider(config.APIKey, config.Endpoint, config.ModelName, headers, config.Parameters), nil
 	default:
 		return nil, fmt.Errorf("unsupported provider type: %s", providerType)
 	}
@@ -184,6 +200,16 @@ func (f *ProviderFactory) GetDefaultConfig(providerType string) *types.ProviderC
 			APIKey:    "", // Optional depending on endpoint
 			Endpoint:  "https://api.openai.com/v1/chat/completions",
 			ModelName: "generic-model",
+			Parameters: map[string]interface{}{
+				"max_tokens":  4000,
+				"temperature": 0.1,
+			},
+		}
+	case "ollama":
+		return &types.ProviderConfig{
+			APIKey:    "", // No API key needed for local Ollama
+			Endpoint:  "http://localhost:11434/api/generate",
+			ModelName: "llama3.1:8b",
 			Parameters: map[string]interface{}{
 				"max_tokens":  4000,
 				"temperature": 0.1,

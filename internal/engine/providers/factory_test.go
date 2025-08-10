@@ -75,6 +75,20 @@ func TestProviderFactory_RegisterProvider(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name:         "valid ollama provider",
+			providerType: "ollama",
+			config: &types.ProviderConfig{
+				APIKey:    "", // No API key needed for local Ollama
+				Endpoint:  "http://localhost:11434/api/generate",
+				ModelName: "llama3.1:8b",
+				Parameters: map[string]interface{}{
+					"max_tokens":  4000,
+					"temperature": 0.1,
+				},
+			},
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -141,6 +155,21 @@ func TestProviderFactory_CreateProvider(t *testing.T) {
 		t.Fatalf("Failed to register generic provider: %v", err)
 	}
 
+	// Register an ollama provider
+	ollamaConfig := &types.ProviderConfig{
+		APIKey:    "", // No API key needed for local Ollama
+		Endpoint:  "http://localhost:11434/api/generate",
+		ModelName: "llama3.1:8b",
+		Parameters: map[string]interface{}{
+			"max_tokens":  4000,
+			"temperature": 0.1,
+		},
+	}
+	err = factory.RegisterProvider("ollama", ollamaConfig)
+	if err != nil {
+		t.Fatalf("Failed to register ollama provider: %v", err)
+	}
+
 	tests := []struct {
 		name      string
 		modelType string
@@ -162,6 +191,11 @@ func TestProviderFactory_CreateProvider(t *testing.T) {
 			wantErr:   false,
 		},
 		{
+			name:      "supported ollama provider",
+			modelType: "ollama",
+			wantErr:   false,
+		},
+		{
 			name:      "unsupported provider type",
 			modelType: "unsupported",
 			wantErr:   true,
@@ -173,7 +207,7 @@ func TestProviderFactory_CreateProvider(t *testing.T) {
 		},
 		{
 			name:      "unregistered provider",
-			modelType: "ollama",
+			modelType: "unsupported-provider",
 			wantErr:   true,
 		},
 	}
@@ -226,6 +260,17 @@ func TestProviderFactory_CreateProvider(t *testing.T) {
 					if gp.ModelName != "generic-model" {
 						t.Errorf("Generic provider ModelName = %s, want generic-model", gp.ModelName)
 					}
+				case "ollama":
+					if _, ok := provider.(*OllamaProvider); !ok {
+						t.Error("CreateProvider() returned wrong provider type for ollama")
+					}
+					op := provider.(*OllamaProvider)
+					if op.ModelName != "llama3.1:8b" {
+						t.Errorf("Ollama provider ModelName = %s, want llama3.1:8b", op.ModelName)
+					}
+					if op.Endpoint != "http://localhost:11434/api/generate" {
+						t.Errorf("Ollama provider Endpoint = %s, want http://localhost:11434/api/generate", op.Endpoint)
+					}
 				}
 			}
 		})
@@ -272,21 +317,36 @@ func TestProviderFactory_GetSupportedProviders(t *testing.T) {
 		t.Fatalf("Failed to register openai provider: %v", err)
 	}
 
-	// Now both should be supported
-	supported = factory.GetSupportedProviders()
-	if len(supported) != 2 {
-		t.Errorf("GetSupportedProviders() expected 2 providers, got %d", len(supported))
+	// Register an ollama provider
+	ollamaConfig := &types.ProviderConfig{
+		APIKey:    "",
+		Endpoint:  "http://localhost:11434/api/generate",
+		ModelName: "llama3.1:8b",
+	}
+	err = factory.RegisterProvider("ollama", ollamaConfig)
+	if err != nil {
+		t.Fatalf("Failed to register ollama provider: %v", err)
 	}
 
-	// Check that both providers are in the list
+	// Now three should be supported
+	supported = factory.GetSupportedProviders()
+	if len(supported) != 3 {
+		t.Errorf("GetSupportedProviders() expected 3 providers, got %d", len(supported))
+	}
+
+	// Check that all providers are in the list
 	hasClaude := false
 	hasOpenAI := false
+	hasOllama := false
 	for _, provider := range supported {
 		if provider == "claude" {
 			hasClaude = true
 		}
 		if provider == "openai" {
 			hasOpenAI = true
+		}
+		if provider == "ollama" {
+			hasOllama = true
 		}
 	}
 
@@ -295,6 +355,9 @@ func TestProviderFactory_GetSupportedProviders(t *testing.T) {
 	}
 	if !hasOpenAI {
 		t.Error("GetSupportedProviders() missing openai provider")
+	}
+	if !hasOllama {
+		t.Error("GetSupportedProviders() missing ollama provider")
 	}
 }
 
@@ -437,6 +500,12 @@ func TestProviderFactory_ValidateProvider(t *testing.T) {
 		{
 			name:         "valid registered generic provider",
 			providerType: "generic",
+			register:     true,
+			wantErr:      false,
+		},
+		{
+			name:         "valid registered ollama provider",
+			providerType: "ollama",
 			register:     true,
 			wantErr:      false,
 		},
@@ -657,6 +726,11 @@ func TestProviderFactory_GetDefaultConfig(t *testing.T) {
 			expectNil:    false,
 		},
 		{
+			name:         "ollama provider",
+			providerType: "ollama",
+			expectNil:    false,
+		},
+		{
 			name:         "unsupported provider",
 			providerType: "unsupported",
 			expectNil:    true,
@@ -743,6 +817,28 @@ func TestProviderFactory_GetDefaultConfig(t *testing.T) {
 					}
 					if config.ModelName != "generic-model" {
 						t.Errorf("GetDefaultConfig() expected model name 'generic-model', got '%s'", config.ModelName)
+					}
+					if config.Parameters == nil {
+						t.Error("GetDefaultConfig() expected parameters map")
+					} else {
+						if maxTokens, ok := config.Parameters["max_tokens"].(int); !ok || maxTokens != 4000 {
+							t.Errorf("GetDefaultConfig() expected max_tokens 4000, got %v", maxTokens)
+						}
+						if temp, ok := config.Parameters["temperature"].(float64); !ok || temp != 0.1 {
+							t.Errorf("GetDefaultConfig() expected temperature 0.1, got %v", temp)
+						}
+					}
+				}
+				// Verify ollama config
+				if tt.providerType == "ollama" {
+					if config.APIKey != "" {
+						t.Error("GetDefaultConfig() expected empty API key for ollama")
+					}
+					if config.Endpoint != "http://localhost:11434/api/generate" {
+						t.Errorf("GetDefaultConfig() expected endpoint 'http://localhost:11434/api/generate', got '%s'", config.Endpoint)
+					}
+					if config.ModelName != "llama3.1:8b" {
+						t.Errorf("GetDefaultConfig() expected model name 'llama3.1:8b', got '%s'", config.ModelName)
 					}
 					if config.Parameters == nil {
 						t.Error("GetDefaultConfig() expected parameters map")
