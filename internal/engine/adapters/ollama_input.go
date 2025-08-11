@@ -1,7 +1,10 @@
 package adapters
 
 import (
+	"encoding/json"
 	"fmt"
+	"log"
+	"os"
 	"strings"
 	"time"
 
@@ -78,6 +81,35 @@ func (o *OllamaInputAdapter) AdaptRequest(req *types.InternalRequest) (*types.Mo
 		Model:      o.ModelName,
 		Messages:   []interface{}{ollamaReq}, // Store Ollama request as a message
 		Parameters: o.GetAPIParameters(),
+	}
+
+	// Log prompts if enabled - for temporary debugging
+	if os.Getenv("LOG_PROMPTS") == "true" || os.Getenv("LOG_PROMPTS") == "1" {
+		log.Printf("[PromptDebug][ollama] System prompt:\n%s", o.SystemPrompt)
+		log.Printf("[PromptDebug][ollama] User prompt:\n%s", formattedPrompt)
+	}
+
+	// Log complete raw message if enabled
+	if os.Getenv("LOG_PROMPTS") == "true" || os.Getenv("LOG_PROMPTS") == "1" {
+		// Create a clean version of the request for logging (without sensitive data)
+		logRequest := map[string]interface{}{
+			"model":  o.ModelName,
+			"prompt": formattedPrompt,
+			"parameters": map[string]interface{}{
+				"temperature": o.Temperature,
+				"num_predict": o.MaxTokens,
+				"format":      "json",
+				"provider":    "ollama",
+			},
+		}
+
+		// Convert to JSON for pretty logging
+		if jsonData, err := json.MarshalIndent(logRequest, "", "  "); err == nil {
+			log.Printf("[PromptDebug][ollama] Complete raw message sent to Ollama:\n%s", string(jsonData))
+		} else {
+			log.Printf("[PromptDebug][ollama] Complete raw message sent to Ollama (fallback):\nModel: %s\nPrompt: %s\nParameters: %+v",
+				o.ModelName, formattedPrompt, logRequest["parameters"])
+		}
 	}
 
 	return modelRequest, nil

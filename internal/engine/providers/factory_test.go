@@ -597,7 +597,6 @@ func TestProviderFactory_CreateProviderWithConfig(t *testing.T) {
 				Parameters: map[string]interface{}{
 					"max_tokens":  4000,
 					"temperature": 0.1,
-					"top_p":       1.0,
 				},
 			},
 			wantErr: false,
@@ -802,9 +801,7 @@ func TestProviderFactory_GetDefaultConfig(t *testing.T) {
 						if temp, ok := config.Parameters["temperature"].(float64); !ok || temp != 0.1 {
 							t.Errorf("GetDefaultConfig() expected temperature 0.1, got %v", temp)
 						}
-						if topP, ok := config.Parameters["top_p"].(float64); !ok || topP != 1.0 {
-							t.Errorf("GetDefaultConfig() expected top_p 1.0, got %v", topP)
-						}
+
 					}
 				}
 				// Verify generic config

@@ -876,8 +876,6 @@ func TestNewGenAIProcessorFromConfig_OllamaIntegration(t *testing.T) {
 			"system":      "You are an OpenShift audit query specialist.",
 			"max_tokens":  "4000",
 			"temperature": "0.1",
-			"top_p":       "0.9",
-			"top_k":       "40",
 		},
 	}
 

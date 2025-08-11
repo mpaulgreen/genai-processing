@@ -92,7 +92,6 @@ func TestNewOpenAIProviderWithConfig(t *testing.T) {
 			parameters: map[string]interface{}{
 				"max_tokens":  2000,
 				"temperature": 0.2,
-				"top_p":       0.9,
 			},
 			wantErr: false,
 		},
@@ -207,7 +206,6 @@ func TestOpenAIProvider_GenerateResponse_WithStoredConfig(t *testing.T) {
 		map[string]interface{}{
 			"max_tokens":  1500,
 			"temperature": 0.3,
-			"top_p":       0.8,
 		},
 	)
 
@@ -242,9 +240,6 @@ func TestOpenAIProvider_GenerateResponse_WithStoredConfig(t *testing.T) {
 		}
 		if reqBody.Temperature != 0.3 {
 			t.Errorf("Request temperature = %f, want 0.3", reqBody.Temperature)
-		}
-		if reqBody.TopP != 0.8 {
-			t.Errorf("Request top_p = %f, want 0.8", reqBody.TopP)
 		}
 
 		// Return success response
@@ -316,7 +311,6 @@ func TestOpenAIProvider_GenerateResponse_RequestOverridesStoredConfig(t *testing
 		map[string]interface{}{
 			"max_tokens":  1000, // Stored parameters
 			"temperature": 0.1,
-			"top_p":       1.0,
 		},
 	)
 
@@ -332,7 +326,7 @@ func TestOpenAIProvider_GenerateResponse_RequestOverridesStoredConfig(t *testing
 		Parameters: map[string]interface{}{
 			"max_tokens":  500, // Override stored parameter
 			"temperature": 0.5, // Override stored parameter
-			"top_p":       0.9, // Override stored parameter
+
 		},
 	}
 
@@ -355,9 +349,6 @@ func TestOpenAIProvider_GenerateResponse_RequestOverridesStoredConfig(t *testing
 		}
 		if reqBody.Temperature != 0.5 {
 			t.Errorf("Request temperature = %f, want 0.5", reqBody.Temperature)
-		}
-		if reqBody.TopP != 0.9 {
-			t.Errorf("Request top_p = %f, want 0.9", reqBody.TopP)
 		}
 
 		// Return success response
@@ -876,9 +867,9 @@ func TestOpenAIProvider_MessageConversion(t *testing.T) {
 			},
 		},
 		Parameters: map[string]interface{}{
-			"max_tokens":        50,
-			"temperature":       0.5,
-			"top_p":             0.9,
+			"max_tokens":  50,
+			"temperature": 0.5,
+
 			"frequency_penalty": 0.0,
 			"presence_penalty":  0.0,
 		},
@@ -917,10 +908,6 @@ func TestOpenAIProvider_MessageConversion(t *testing.T) {
 
 		if openaiReq.Temperature != 0.5 {
 			t.Errorf("expected temperature 0.5, got %f", openaiReq.Temperature)
-		}
-
-		if openaiReq.TopP != 0.9 {
-			t.Errorf("expected top_p 0.9, got %f", openaiReq.TopP)
 		}
 
 		// Return success response

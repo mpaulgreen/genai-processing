@@ -192,7 +192,6 @@ func (f *ProviderFactory) GetDefaultConfig(providerType string) *types.ProviderC
 			Parameters: map[string]interface{}{
 				"max_tokens":  4000,
 				"temperature": 0.1,
-				"top_p":       1.0,
 			},
 		}
 	case "generic":

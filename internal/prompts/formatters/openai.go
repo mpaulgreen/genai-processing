@@ -12,22 +12,16 @@ import (
 var _ interfaces.PromptFormatter = (*OpenAIFormatter)(nil)
 
 type OpenAIFormatter struct {
-	template      string
-	systemMessage string
-	userMessage   string
+	template string
 }
 
-func NewOpenAIFormatter(template, systemMessage, userMessage string) *OpenAIFormatter {
-	return &OpenAIFormatter{template: template, systemMessage: systemMessage, userMessage: userMessage}
+func NewOpenAIFormatter(template string) *OpenAIFormatter {
+	return &OpenAIFormatter{template: template}
 }
 
 func (f *OpenAIFormatter) FormatSystemPrompt(systemPrompt string) (string, error) {
-	if strings.TrimSpace(f.systemMessage) == "" {
-		return systemPrompt, nil
-	}
-	out := strings.ReplaceAll(f.systemMessage, "{system_prompt}", systemPrompt)
-	out = strings.ReplaceAll(out, "{examples}", "")
-	return out, nil
+	// Simplified to just return the system prompt since we no longer have system_message field
+	return systemPrompt, nil
 }
 
 func (f *OpenAIFormatter) FormatExamples(examples []types.Example) (string, error) {
@@ -46,8 +40,8 @@ func (f *OpenAIFormatter) FormatExamples(examples []types.Example) (string, erro
 }
 
 func (f *OpenAIFormatter) FormatComplete(systemPrompt string, examples []types.Example, query string) (string, error) {
-	// If no template fields, fallback to simple rendering
-	if strings.TrimSpace(f.template) == "" && strings.TrimSpace(f.userMessage) == "" {
+	// If no template, fallback to simple rendering
+	if strings.TrimSpace(f.template) == "" {
 		var b strings.Builder
 		b.WriteString(systemPrompt)
 		if exStr, _ := f.FormatExamples(examples); exStr != "" {
@@ -60,14 +54,7 @@ func (f *OpenAIFormatter) FormatComplete(systemPrompt string, examples []types.E
 	}
 
 	exRendered, _ := f.FormatExamples(examples)
-	// Prefer userMessage when provided
-	if strings.TrimSpace(f.userMessage) != "" {
-		out := strings.ReplaceAll(f.userMessage, "{query}", query)
-		out = strings.ReplaceAll(out, "{system_prompt}", systemPrompt)
-		out = strings.ReplaceAll(out, "{examples}", exRendered)
-		return out, nil
-	}
-	// Else use full template
+	// Use template
 	out := f.template
 	out = strings.ReplaceAll(out, "{system_prompt}", systemPrompt)
 	out = strings.ReplaceAll(out, "{examples}", exRendered)

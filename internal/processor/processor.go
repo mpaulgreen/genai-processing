@@ -199,29 +199,12 @@ func NewGenAIProcessorFromConfig(appConfig *config.AppConfig) (*GenAIProcessor, 
 		return nil, fmt.Errorf("failed to create provider '%s': %w", providerType, err)
 	}
 
-	// Helper: choose system prompt from prompts.yaml with fallbacks
-	chooseSystemPrompt := func(providerType string) (string, string) {
+	// Helper: choose system prompt from prompts.yaml - now simplified to use base only
+	chooseSystemPrompt := func() (string, string) {
 		sys := ""
-		key := ""
+		key := "base"
 		if appConfig != nil && appConfig.Prompts.SystemPrompts != nil {
-			switch providerType {
-			case "claude":
-				key = "claude_specific"
-				sys = appConfig.Prompts.SystemPrompts[key]
-			case "openai":
-				key = "openai_specific"
-				sys = appConfig.Prompts.SystemPrompts[key]
-			case "ollama":
-				key = "generic_specific"
-				sys = appConfig.Prompts.SystemPrompts[key]
-			case "generic":
-				key = "generic_specific"
-				sys = appConfig.Prompts.SystemPrompts[key]
-			}
-			if sys == "" {
-				key = "base"
-				sys = appConfig.Prompts.SystemPrompts[key]
-			}
+			sys = appConfig.Prompts.SystemPrompts[key]
 		}
 		return sys, key
 	}
@@ -246,7 +229,7 @@ func NewGenAIProcessorFromConfig(appConfig *config.AppConfig) (*GenAIProcessor, 
 			return promptformatters.NewClaudeFormatter(appConfig.Prompts.Formats.Claude.Template)
 		case "openai":
 			of := appConfig.Prompts.Formats.OpenAI
-			return promptformatters.NewOpenAIFormatter(of.Template, of.SystemMessage, of.UserMessage)
+			return promptformatters.NewOpenAIFormatter(of.Template)
 		default:
 			return promptformatters.NewGenericFormatter(appConfig.Prompts.Formats.Generic.Template)
 		}
@@ -264,9 +247,9 @@ func NewGenAIProcessorFromConfig(appConfig *config.AppConfig) (*GenAIProcessor, 
 		if sys, ok := activeCfg.Parameters["system"].(string); ok && sys != "" {
 			claude.SetSystemPrompt(sys)
 			logger.Printf("system prompt: override from models.yaml parameters.system for provider claude")
-		} else if sp, key := chooseSystemPrompt("claude"); sp != "" {
+		} else if sp, key := chooseSystemPrompt(); sp != "" {
 			claude.SetSystemPrompt(sp)
-			logger.Printf("system prompt: selected '%s' for provider claude", key)
+			logger.Printf("system prompt: using '%s' for provider claude", key)
 		}
 		// Wire examples from prompts.yaml
 		claude.SetExamples(appConfig.Prompts.Examples)
@@ -281,9 +264,9 @@ func NewGenAIProcessorFromConfig(appConfig *config.AppConfig) (*GenAIProcessor, 
 		if sys, ok := activeCfg.Parameters["system"].(string); ok && sys != "" {
 			openai.SetSystemPrompt(sys)
 			logger.Printf("system prompt: override from models.yaml parameters.system for provider openai")
-		} else if sp, key := chooseSystemPrompt("openai"); sp != "" {
+		} else if sp, key := chooseSystemPrompt(); sp != "" {
 			openai.SetSystemPrompt(sp)
-			logger.Printf("system prompt: selected '%s' for provider openai", key)
+			logger.Printf("system prompt: using '%s' for provider openai", key)
 		}
 		openai.SetExamples(appConfig.Prompts.Examples)
 		openai.SetFormatter(makeFormatter("openai", mc.PromptFormatter))
@@ -296,9 +279,9 @@ func NewGenAIProcessorFromConfig(appConfig *config.AppConfig) (*GenAIProcessor, 
 		if sys, ok := activeCfg.Parameters["system"].(string); ok && sys != "" {
 			ollama.SetSystemPrompt(sys)
 			logger.Printf("system prompt: override from models.yaml parameters.system for provider ollama")
-		} else if sp, key := chooseSystemPrompt("ollama"); sp != "" {
+		} else if sp, key := chooseSystemPrompt(); sp != "" {
 			ollama.SetSystemPrompt(sp)
-			logger.Printf("system prompt: selected '%s' for provider ollama", key)
+			logger.Printf("system prompt: using '%s' for provider ollama", key)
 		}
 		ollama.SetExamples(appConfig.Prompts.Examples)
 		ollama.SetFormatter(makeFormatter("generic", mc.PromptFormatter))
@@ -312,9 +295,9 @@ func NewGenAIProcessorFromConfig(appConfig *config.AppConfig) (*GenAIProcessor, 
 		if sys, ok := activeCfg.Parameters["system"].(string); ok && sys != "" {
 			generic.SetSystemPrompt(sys)
 			logger.Printf("system prompt: override from models.yaml parameters.system for provider generic")
-		} else if sp, key := chooseSystemPrompt("generic"); sp != "" {
+		} else if sp, key := chooseSystemPrompt(); sp != "" {
 			generic.SetSystemPrompt(sp)
-			logger.Printf("system prompt: selected '%s' for provider generic", key)
+			logger.Printf("system prompt: using '%s' for provider generic", key)
 		}
 		generic.SetFormatter(makeFormatter("generic", mc.PromptFormatter))
 		// Generic adapter has no SetSystemPrompt

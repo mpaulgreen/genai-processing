@@ -1,7 +1,10 @@
 package adapters
 
 import (
+	"encoding/json"
 	"fmt"
+	"log"
+	"os"
 	"strings"
 	"time"
 
@@ -79,6 +82,39 @@ func (g *GenericInputAdapter) AdaptRequest(req *types.InternalRequest) (*types.M
 		Model:      g.ModelName,
 		Messages:   messages,
 		Parameters: g.GetAPIParameters(),
+	}
+
+	// Log prompts if enabled - for temporary debugging
+	if os.Getenv("LOG_PROMPTS") == "true" || os.Getenv("LOG_PROMPTS") == "1" {
+		log.Printf("[PromptDebug][generic] System prompt:\n%s", g.SystemPrompt)
+		log.Printf("[PromptDebug][generic] User prompt:\n%s", formattedPrompt)
+	}
+
+	// Log complete raw message if enabled
+	if os.Getenv("LOG_PROMPTS") == "true" || os.Getenv("LOG_PROMPTS") == "1" {
+		// Create a clean version of the request for logging (without sensitive data)
+		logRequest := map[string]interface{}{
+			"model": g.ModelName,
+			"messages": []map[string]interface{}{
+				{
+					"role":    "user",
+					"content": formattedPrompt,
+				},
+			},
+			"parameters": map[string]interface{}{
+				"max_tokens":  g.MaxTokens,
+				"temperature": g.Temperature,
+				"provider":    "generic",
+			},
+		}
+
+		// Convert to JSON for pretty logging
+		if jsonData, err := json.MarshalIndent(logRequest, "", "  "); err == nil {
+			log.Printf("[PromptDebug][generic] Complete raw message sent to Generic API:\n%s", string(jsonData))
+		} else {
+			log.Printf("[PromptDebug][generic] Complete raw message sent to Generic API (fallback):\nModel: %s\nMessages: %+v\nParameters: %+v",
+				g.ModelName, modelRequest.Messages, logRequest["parameters"])
+		}
 	}
 
 	return modelRequest, nil

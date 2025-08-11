@@ -1,7 +1,10 @@
 package adapters
 
 import (
+	"encoding/json"
 	"fmt"
+	"log"
+	"os"
 	"strings"
 	"time"
 
@@ -114,6 +117,40 @@ func (c *ClaudeInputAdapter) AdaptRequest(req *types.InternalRequest) (*types.Mo
 				"content-type":      "application/json",
 			},
 		},
+	}
+
+	// Log prompts if enabled - for temporary debugging
+	if os.Getenv("LOG_PROMPTS") == "true" || os.Getenv("LOG_PROMPTS") == "1" {
+		log.Printf("[PromptDebug][claude] System prompt:\n%s", c.getSystemPromptWithFallback())
+		log.Printf("[PromptDebug][claude] User prompt:\n%s", formattedPrompt)
+	}
+
+	// Log complete raw message if enabled
+	if os.Getenv("LOG_PROMPTS") == "true" || os.Getenv("LOG_PROMPTS") == "1" {
+		// Create a clean version of the request for logging (without sensitive data)
+		logRequest := map[string]interface{}{
+			"model": c.ModelName,
+			"messages": []map[string]interface{}{
+				{
+					"role":    "user",
+					"content": formattedPrompt,
+				},
+			},
+			"parameters": map[string]interface{}{
+				"max_tokens":  c.MaxTokens,
+				"temperature": c.Temperature,
+				"system":      c.getSystemPromptWithFallback(),
+				"provider":    "claude",
+			},
+		}
+
+		// Convert to JSON for pretty logging
+		if jsonData, err := json.MarshalIndent(logRequest, "", "  "); err == nil {
+			log.Printf("[PromptDebug][claude] Complete raw message sent to Claude:\n%s", string(jsonData))
+		} else {
+			log.Printf("[PromptDebug][claude] Complete raw message sent to Claude (fallback):\nModel: %s\nMessages: %+v\nParameters: %+v",
+				c.ModelName, modelRequest.Messages, logRequest["parameters"])
+		}
 	}
 
 	return modelRequest, nil

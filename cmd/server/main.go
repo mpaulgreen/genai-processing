@@ -170,7 +170,7 @@ func logConfigurationStatus(appConfig *config.AppConfig) {
 	if t := appConfig.Prompts.Formats.Claude.Template; t != "" {
 		log.Printf("  Formatter template active: claude")
 	}
-	if t := appConfig.Prompts.Formats.OpenAI.Template; t != "" || appConfig.Prompts.Formats.OpenAI.UserMessage != "" || appConfig.Prompts.Formats.OpenAI.SystemMessage != "" {
+	if t := appConfig.Prompts.Formats.OpenAI.Template; t != "" {
 		log.Printf("  Formatter template active: openai")
 	}
 	if t := appConfig.Prompts.Formats.Generic.Template; t != "" {

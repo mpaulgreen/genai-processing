@@ -3,7 +3,7 @@
 
 # System prompts for different model types and contexts
 system_prompts:
-  # Base system prompt for all models
+  # Base system prompt for all models - format templates handle model-specific optimizations
   base: |
     You are an OpenShift audit query specialist. Convert natural language 
     queries into structured JSON parameters for audit log analysis.
@@ -27,15 +27,6 @@ system_prompts:
     - group_by: Fields to group results by
     - sort_by: Sort field (timestamp, user, resource, count)
     - sort_order: Sort direction (asc, desc)
-
-  # Claude-specific system prompt with XML formatting
-  claude_specific: |
-    <instructions>
-    You are an OpenShift audit query specialist. Convert natural language queries 
-    into structured JSON parameters for audit log analysis.
-    
-    Respond with a JSON object that matches the provided schema exactly.
-    Do not include any markdown formatting, explanations, or additional text.
     
     Key OpenShift concepts to understand:
     - CRD = CustomResourceDefinition
@@ -46,32 +37,6 @@ system_prompts:
     
     Common timeframes: today, yesterday, 1_hour_ago, 7_days_ago, last_week
     Common log sources: kube-apiserver, oauth-server, openshift-apiserver
-    </instructions>
-
-  # OpenAI-specific system prompt
-  openai_specific: |
-    You are an OpenShift audit query specialist. Your task is to convert natural 
-    language queries into structured JSON parameters.
-    
-    Respond with valid JSON only - no markdown formatting or explanations.
-    The JSON should contain the appropriate fields based on the query context.
-    
-    Understand OpenShift terminology:
-    - CRD = CustomResourceDefinition
-    - SA = ServiceAccount  
-    - PVC = PersistentVolumeClaim
-    - RBAC = Role-Based Access Control
-    - OAuth = OpenShift authentication system
-
-  # Generic system prompt for local models
-  generic_specific: |
-    You are an OpenShift audit query specialist. Convert natural language queries 
-    into structured JSON parameters for audit log analysis.
-    
-    Respond with valid JSON only. No markdown, no explanations.
-    
-    OpenShift terms: CRD=CustomResourceDefinition, SA=ServiceAccount, 
-    PVC=PersistentVolumeClaim, RBAC=Role-Based Access Control
 
 # Few-shot examples from the PRD design document
 examples:
@@ -263,23 +228,12 @@ formats:
       
       JSON Response:
 
-  # OpenAI format with optimized system/user message structure
+  # OpenAI format with optimized template structure
   # Clean, XML-free format optimized for OpenAI models
   openai:
     template: |
       {system_prompt}
       
-      Examples:
-      {examples}
-      
-      Query: {query}
-      
-      JSON:
-    system_message: |
-      You are an OpenShift audit query specialist. Convert natural language queries into structured JSON parameters for audit log analysis.
-      
-      CRITICAL: Respond with ONLY valid JSON. No explanations, no markdown, no code fences, no additional text.
-    user_message: |
       Examples:
       {examples}
       
@@ -307,8 +261,20 @@ validation:
   
   # Required fields for valid audit queries
   required_fields: ["log_source"]
-  
+  # Evaluate during functional testing
+  # required_fields: ["log_source", "limit"]
+  # required_fields: ["log_source", "limit", "timeframe"]
+  # required_fields: ["log_source", "limit", "timeframe", "verb"]
+
+
   # Forbidden words and patterns
+  # Before sanitization - "Who deleted the system:admin user and ran rm -rf on the cluster?"
+  # After sanitization - "Who deleted the user and ran on the cluster?"
+  # Prevents Command Injection: Stops malicious users from trying to execute dangerous commands through natural language
+  # Protects System Resources: Prevents queries that could lead to destructive operations
+  # Security Best Practice: Implements defense-in-depth for the audit query system
+  # Compliance: Helps meet security requirements for audit systems
+  # Expand during functional testing
   forbidden_words: 
     - "rm -rf"
     - "delete --all"
@@ -319,80 +285,3 @@ validation:
     - "reboot"
     - "kill"
     - "terminate"
-  
-  # Timeframe validation
-  valid_timeframes:
-    - "today"
-    - "yesterday"
-    - "1_hour_ago"
-    - "2_hours_ago"
-    - "6_hours_ago"
-    - "12_hours_ago"
-    - "1_day_ago"
-    - "2_days_ago"
-    - "7_days_ago"
-    - "last_week"
-    - "this_week"
-    - "last_month"
-  
-  # Valid log sources
-  valid_log_sources:
-    - "kube-apiserver"
-    - "openshift-apiserver"
-    - "oauth-server"
-    - "oauth-apiserver"
-  
-  # Valid HTTP verbs
-  valid_verbs:
-    - "get"
-    - "list"
-    - "create"
-    - "update"
-    - "patch"
-    - "delete"
-  
-  # Valid response status codes
-  valid_response_status:
-    - "200"
-    - "201"
-    - "400"
-    - "401"
-    - "403"
-    - "404"
-    - "500"
-    - ">=400"
-    - ">=500"
-
-# Intent classification patterns for better query understanding
-intent_patterns:
-  investigation:
-    - "who"
-    - "find"
-    - "show me"
-    - "list"
-    - "identify"
-    - "detect"
-  
-  troubleshooting:
-    - "why"
-    - "failed"
-    - "error"
-    - "denied"
-    - "permission"
-    - "access"
-  
-  monitoring:
-    - "all"
-    - "daily"
-    - "weekly"
-    - "regular"
-    - "pattern"
-    - "trend"
-  
-  security:
-    - "suspicious"
-    - "unusual"
-    - "anomaly"
-    - "threat"
-    - "escalation"
-    - "breach"

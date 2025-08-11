@@ -106,8 +106,7 @@ func TestLoadConfig_WithPromptsFile(t *testing.T) {
 	promptsYAML := `
 system_prompts:
   base: "Custom base prompt"
-  claude_specific: "Custom Claude prompt"
-  openai_specific: "Custom OpenAI prompt"
+  # Removed redundant system prompts - using base only
 
 examples:
   - input: "Test query"

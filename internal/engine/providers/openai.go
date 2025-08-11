@@ -34,8 +34,6 @@ type OpenAIRequest struct {
 	Messages         []OpenAIMessage `json:"messages"`
 	MaxTokens        int             `json:"max_tokens,omitempty"`
 	Temperature      float64         `json:"temperature,omitempty"`
-	TopP             float64         `json:"top_p,omitempty"`
-	TopK             int             `json:"top_k,omitempty"`
 	FrequencyPenalty float64         `json:"frequency_penalty,omitempty"`
 	PresencePenalty  float64         `json:"presence_penalty,omitempty"`
 	Stream           bool            `json:"stream,omitempty"`
@@ -133,8 +131,6 @@ func (o *OpenAIProvider) GenerateResponse(ctx context.Context, request *types.Mo
 		Model:       modelName,
 		MaxTokens:   4000, // Default max tokens
 		Temperature: 0.1,  // Default temperature
-		TopP:        1.0,  // Default top_p
-		TopK:        0,    // Default top_k (0 = disabled)
 		Stream:      false,
 	}
 
@@ -145,12 +141,6 @@ func (o *OpenAIProvider) GenerateResponse(ctx context.Context, request *types.Mo
 		}
 		if temp, ok := o.Parameters["temperature"].(float64); ok {
 			openaiReq.Temperature = temp
-		}
-		if topP, ok := o.Parameters["top_p"].(float64); ok {
-			openaiReq.TopP = topP
-		}
-		if topK, ok := o.Parameters["top_k"].(int); ok {
-			openaiReq.TopK = topK
 		}
 		if freqPenalty, ok := o.Parameters["frequency_penalty"].(float64); ok {
 			openaiReq.FrequencyPenalty = freqPenalty
@@ -187,12 +177,6 @@ func (o *OpenAIProvider) GenerateResponse(ctx context.Context, request *types.Mo
 		}
 		if temp, ok := request.Parameters["temperature"].(float64); ok {
 			openaiReq.Temperature = temp
-		}
-		if topP, ok := request.Parameters["top_p"].(float64); ok {
-			openaiReq.TopP = topP
-		}
-		if topK, ok := request.Parameters["top_k"].(int); ok {
-			openaiReq.TopK = topK
 		}
 		if freqPenalty, ok := request.Parameters["frequency_penalty"].(float64); ok {
 			openaiReq.FrequencyPenalty = freqPenalty

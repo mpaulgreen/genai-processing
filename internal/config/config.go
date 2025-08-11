@@ -70,10 +70,8 @@ type PromptFormats struct {
 
 // PromptFormat defines the structure for a specific model's prompt format
 type PromptFormat struct {
-	Template      string            `yaml:"template" validate:"required"`
-	SystemMessage string            `yaml:"system_message,omitempty"`
-	UserMessage   string            `yaml:"user_message,omitempty"`
-	Parameters    map[string]string `yaml:"parameters,omitempty"`
+	Template   string            `yaml:"template" validate:"required"`
+	Parameters map[string]string `yaml:"parameters,omitempty"`
 }
 
 // PromptValidation defines validation rules for prompts
@@ -272,7 +270,7 @@ func (c *PromptsConfig) Validate() ValidationResult {
 	}
 
 	// Check for required system prompts
-	requiredPrompts := []string{"base", "claude_specific", "openai_specific"}
+	requiredPrompts := []string{"base"}
 	for _, required := range requiredPrompts {
 		if _, exists := c.SystemPrompts[required]; !exists {
 			result.Valid = false
@@ -470,16 +468,6 @@ queries into structured JSON parameters for audit log analysis.
 
 Always respond with valid JSON only. Do not include any markdown formatting,
 explanations, or additional text outside the JSON structure.`,
-				"claude_specific": `<instructions>
-You are an OpenShift audit query specialist. Convert natural language queries 
-into structured JSON parameters for audit log analysis.
-
-Respond with a JSON object that matches the provided schema exactly.
-</instructions>`,
-				"openai_specific": `You are an OpenShift audit query specialist. Your task is to convert natural 
-language queries into structured JSON parameters.
-
-Respond with valid JSON only - no markdown formatting or explanations.`,
 			},
 			Examples: []types.Example{
 				{
@@ -521,9 +509,7 @@ Respond with valid JSON only - no markdown formatting or explanations.`,
 JSON Response:`,
 				},
 				OpenAI: PromptFormat{
-					Template:      "System: {system_prompt}\n\nExamples:\n{examples}\n\nUser: Convert this query to JSON: {query}",
-					SystemMessage: "{system_prompt}\n\nExamples:\n{examples}",
-					UserMessage:   "Convert this query to JSON: {query}",
+					Template: "System: {system_prompt}\n\nExamples:\n{examples}\n\nUser: Convert this query to JSON: {query}",
 				},
 				Generic: PromptFormat{
 					Template: `{system_prompt}

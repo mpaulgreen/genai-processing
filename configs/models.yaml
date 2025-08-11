@@ -1,4 +1,4 @@
-default_provider: "claude"
+default_provider: "openai"
 providers:
   claude:
     provider: "anthropic"
@@ -14,7 +14,7 @@ providers:
     output_parser: "claude_extractor"
     prompt_formatter: "claude"
     parameters:
-      system: "You are an OpenShift audit query specialist."
+      # system: Removed to allow fallback to prompts.yaml base
       max_tokens: "4000"
       temperature: "0.1"
 
@@ -33,11 +33,9 @@ providers:
     output_parser: "openai_extractor"
     prompt_formatter: "openai"
     parameters:
-      system: "You are an OpenShift audit query specialist."
+      # system: Removed to allow fallback to prompts.yaml base
       max_tokens: "4000"
       temperature: "0.0"
-      top_p: "0.9"              # OpenAI-specific knobs (mapped if present)
-      top_k: "40"               # OpenAI-specific knobs (mapped if present)
       presence_penalty: "0.0"   # OpenAI-specific knobs (mapped if present)
       frequency_penalty: "0.0"
       response_format: "json_object"
@@ -57,6 +55,6 @@ providers:
     output_parser: "ollama_extractor"
     prompt_formatter: "generic"
     parameters:
-      system: "You are an OpenShift audit query specialist."
+      # system: Removed to allow fallback to prompts.yaml base
       max_tokens: "4000"
       temperature: "0.1"

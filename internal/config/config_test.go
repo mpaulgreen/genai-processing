@@ -192,9 +192,8 @@ func TestPromptsConfig_Validate(t *testing.T) {
 			name: "valid config",
 			config: PromptsConfig{
 				SystemPrompts: map[string]string{
-					"base":            "Base prompt",
-					"claude_specific": "Claude prompt",
-					"openai_specific": "OpenAI prompt",
+					"base": "Base prompt",
+					// Removed redundant system prompts - using base only
 				},
 				Examples: []types.Example{
 					{
