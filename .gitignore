@@ -29,3 +29,5 @@ go.work
 # idea
 .idea/
 ./vscode
+
+CLAUDE.md
