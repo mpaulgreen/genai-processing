@@ -6,7 +6,6 @@ This document contains 60 comprehensive basic audit queries for the GenAI-Powere
 
 ## Validation Environment
 
-- **OpenShift Cluster**: ai-dev03.kni.syseng.devcluster.openshift.com
 - **Audit Log Sources Available**:
   - ✅ `kube-apiserver/audit.log` - Current data (2025-08-15 21:00)
   - ✅ `openshift-apiserver/audit.log` - Recent data (2025-08-14 23:51)
