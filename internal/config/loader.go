@@ -123,12 +123,7 @@ func (l *Loader) loadPromptsConfig(config *AppConfig) error {
 		promptsConfig.Formats.Generic.Template != "" {
 		config.Prompts.Formats = promptsConfig.Formats
 	}
-	// Check if Validation has been set by checking if any field is non-zero
-	if promptsConfig.Validation.MaxInputLength > 0 ||
-		promptsConfig.Validation.MaxOutputLength > 0 ||
-		len(promptsConfig.Validation.RequiredFields) > 0 {
-		config.Prompts.Validation = promptsConfig.Validation
-	}
+	// Validation is now handled by rules configuration
 
 	return nil
 }
@@ -412,7 +407,6 @@ func (l *Loader) SavePromptsConfig(config *AppConfig) error {
 		SystemPrompts: config.Prompts.SystemPrompts,
 		Examples:      config.Prompts.Examples,
 		Formats:       config.Prompts.Formats,
-		Validation:    config.Prompts.Validation,
 	}
 
 	// Marshal only the prompts config

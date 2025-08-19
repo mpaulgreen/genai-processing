@@ -59,7 +59,6 @@ type PromptsConfig struct {
 	SystemPrompts map[string]string `yaml:"system_prompts" validate:"required"`
 	Examples      []types.Example   `yaml:"examples" validate:"required"`
 	Formats       PromptFormats     `yaml:"formats" validate:"required"`
-	Validation    PromptValidation  `yaml:"validation" validate:"required"`
 }
 
 // PromptExample removed in favor of types.Example
@@ -94,6 +93,7 @@ type RulesConfig struct {
 	AnalysisLimits   AnalysisLimits   `yaml:"analysis_limits" validate:"required"`
 	ResponseStatus   ResponseStatus   `yaml:"response_status" validate:"required"`
 	AuthDecisions    AuthDecisions    `yaml:"auth_decisions" validate:"required"`
+	PromptValidation PromptValidation `yaml:"prompt_validation" validate:"required"`
 }
 
 // SafetyRules defines allowed and forbidden patterns for audit queries
@@ -415,11 +415,7 @@ func (c *PromptsConfig) Validate() ValidationResult {
 		result.Errors = append(result.Errors, formatsResult.Errors...)
 	}
 
-	// Validate validation rules
-	if validationResult := c.Validation.Validate(); !validationResult.Valid {
-		result.Valid = false
-		result.Errors = append(result.Errors, validationResult.Errors...)
-	}
+	// Validation rules are now handled by RulesConfig
 
 	return result
 }
@@ -932,12 +928,6 @@ Query: {query}
 JSON Response:`,
 				},
 			},
-			Validation: PromptValidation{
-				MaxInputLength:  1000,
-				MaxOutputLength: 2000,
-				RequiredFields:  []string{"log_source"},
-				ForbiddenWords:  []string{"rm -rf", "delete --all", "system:admin"},
-			},
 		},
 		Rules:   *GetDefaultRulesConfig(),
 		Context: *GetDefaultContextConfig(),
@@ -1037,6 +1027,15 @@ func GetDefaultRulesConfig() *RulesConfig {
 		},
 		AuthDecisions: AuthDecisions{
 			AllowedDecisions: []string{"allow", "error", "forbid"},
+		},
+		PromptValidation: PromptValidation{
+			MaxInputLength:  1000,
+			MaxOutputLength: 2000,
+			RequiredFields:  []string{"log_source"},
+			ForbiddenWords: []string{
+				"rm -rf", "delete --all", "system:admin", "drop database",
+				"format c:", "shutdown", "reboot", "kill", "terminate",
+			},
 		},
 	}
 }

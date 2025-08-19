@@ -1,0 +1,19 @@
+# Context Manager Configuration
+# This file configures session management, persistence, and memory settings for the context manager
+
+# Session cleanup settings
+cleanup_interval: "5m"    # How often to clean up expired sessions
+
+# Session lifecycle settings
+session_timeout: "24h"    # How long sessions remain active without activity
+max_sessions: 10000       # Maximum number of concurrent sessions
+
+# Memory management
+max_memory_mb: 100        # Maximum memory usage in MB
+
+# Persistence configuration
+enable_persistence: true
+persistence_path: "./sessions"          # Directory to store session data
+persistence_format: "json"              # Format for persisted data (json, yaml, binary)
+persistence_interval: "30s"             # How often to persist session data to disk
+enable_async_persistence: true          # Enable asynchronous persistence for better performance

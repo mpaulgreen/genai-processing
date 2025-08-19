@@ -119,12 +119,6 @@ formats:
     template: "Custom OpenAI template"
   generic:
     template: "Custom generic template"
-
-validation:
-  max_input_length: 500
-  max_output_length: 1000
-  required_fields: ["log_source", "verb"]
-  forbidden_words: ["bad_word"]
 `
 
 	promptsPath := filepath.Join(tempDir, "prompts.yaml")
@@ -155,13 +149,7 @@ validation:
 		t.Errorf("Expected custom Claude template, got %s", config.Prompts.Formats.Claude.Template)
 	}
 
-	if config.Prompts.Validation.MaxInputLength != 500 {
-		t.Errorf("Expected max input length 500, got %d", config.Prompts.Validation.MaxInputLength)
-	}
-
-	if len(config.Prompts.Validation.RequiredFields) != 2 {
-		t.Errorf("Expected 2 required fields, got %d", len(config.Prompts.Validation.RequiredFields))
-	}
+	// Note: Validation configuration has been moved to rules.yaml
 }
 
 func TestLoadConfig_EnvironmentOverrides(t *testing.T) {

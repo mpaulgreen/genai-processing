@@ -134,6 +134,18 @@ func loadConfiguration() (*config.AppConfig, error) {
 func logConfigurationStatus(appConfig *config.AppConfig) {
 	log.Println("=== Configuration Status ===")
 
+	// Context configuration
+	log.Printf("Context Configuration:")
+	log.Printf("  Cleanup Interval: %v", appConfig.Context.CleanupInterval)
+	log.Printf("  Session Timeout: %v", appConfig.Context.SessionTimeout)
+	log.Printf("  Max Sessions: %d", appConfig.Context.MaxSessions)
+	log.Printf("  Max Memory: %d MB", appConfig.Context.MaxMemoryMB)
+	log.Printf("  Persistence Enabled: %t", appConfig.Context.EnablePersistence)
+	log.Printf("  Persistence Path: %s", appConfig.Context.PersistencePath)
+	log.Printf("  Persistence Format: %s", appConfig.Context.PersistenceFormat)
+	log.Printf("  Persistence Interval: %v", appConfig.Context.PersistenceInterval)
+	log.Printf("  Async Persistence: %t", appConfig.Context.EnableAsyncPersistence)
+
 	// Server configuration
 	log.Printf("Server Configuration:")
 	log.Printf("  Host: %s", appConfig.Server.Host)
@@ -156,9 +168,9 @@ func logConfigurationStatus(appConfig *config.AppConfig) {
 	log.Printf("Prompts Configuration:")
 	log.Printf("  System Prompts: %d", len(appConfig.Prompts.SystemPrompts))
 	log.Printf("  Examples: %d", len(appConfig.Prompts.Examples))
-	log.Printf("  Max Input Length: %d", appConfig.Prompts.Validation.MaxInputLength)
-	log.Printf("  Max Output Length: %d", appConfig.Prompts.Validation.MaxOutputLength)
-	log.Printf("  Required Fields: %v", appConfig.Prompts.Validation.RequiredFields)
+	log.Printf("  Max Input Length: %d", appConfig.Rules.PromptValidation.MaxInputLength)
+	log.Printf("  Max Output Length: %d", appConfig.Rules.PromptValidation.MaxOutputLength)
+	log.Printf("  Required Fields: %v", appConfig.Rules.PromptValidation.RequiredFields)
 	// Which system prompt keys are present
 	keys := []string{"base", "claude_specific", "openai_specific", "generic_specific"}
 	for _, k := range keys {
@@ -176,6 +188,22 @@ func logConfigurationStatus(appConfig *config.AppConfig) {
 	if t := appConfig.Prompts.Formats.Generic.Template; t != "" {
 		log.Printf("  Formatter template active: generic")
 	}
+
+	// Rules configuration
+	log.Printf("Rules Configuration:")
+	log.Printf("  Allowed Log Sources: %d", len(appConfig.Rules.SafetyRules.AllowedLogSources))
+	log.Printf("  Allowed Verbs: %d", len(appConfig.Rules.SafetyRules.AllowedVerbs))
+	log.Printf("  Allowed Resources: %d", len(appConfig.Rules.SafetyRules.AllowedResources))
+	log.Printf("  Forbidden Patterns: %d", len(appConfig.Rules.SafetyRules.ForbiddenPatterns))
+	log.Printf("  Max Query Length: %d", appConfig.Rules.Sanitization.MaxQueryLength)
+	log.Printf("  Max Days Back: %d", appConfig.Rules.SafetyRules.TimeframeLimits.MaxDaysBack)
+	log.Printf("  Default Query Limit: %d", appConfig.Rules.SafetyRules.TimeframeLimits.DefaultLimit)
+	log.Printf("  Max Query Limit: %d", appConfig.Rules.SafetyRules.TimeframeLimits.MaxLimit)
+	log.Printf("  Business Hours: %d-%d %s", appConfig.Rules.BusinessHours.DefaultStartHour, appConfig.Rules.BusinessHours.DefaultEndHour, appConfig.Rules.BusinessHours.DefaultTimezone)
+	log.Printf("  Prompt Validation - Max Input: %d", appConfig.Rules.PromptValidation.MaxInputLength)
+	log.Printf("  Prompt Validation - Max Output: %d", appConfig.Rules.PromptValidation.MaxOutputLength)
+	log.Printf("  Prompt Validation - Required Fields: %v", appConfig.Rules.PromptValidation.RequiredFields)
+	log.Printf("  Prompt Validation - Forbidden Words: %d", len(appConfig.Rules.PromptValidation.ForbiddenWords))
 
 	log.Println("=== Configuration Status Complete ===")
 }

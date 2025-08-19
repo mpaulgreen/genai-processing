@@ -41,7 +41,7 @@ type GenAIProcessor struct {
 	retryAttempts   int
 	retryDelay      time.Duration
 
-	// Prompt validation settings from prompts.yaml
+	// Prompt validation settings from rules.yaml
 	promptValidation config.PromptValidation
 }
 
@@ -316,9 +316,9 @@ func NewGenAIProcessorFromConfig(appConfig *config.AppConfig) (*GenAIProcessor, 
 		RepromptTemplate:    "The previous response was not in the expected JSON format. Please provide a valid JSON response for the following query: %s",
 	}
 	retryParser := recovery.NewRetryParser(retryConfig, llmEngine, contextManager)
-	// Enforce LLM output length from prompts validation if specified
-	if appConfig.Prompts.Validation.MaxOutputLength > 0 {
-		retryParser.SetMaxOutputLength(appConfig.Prompts.Validation.MaxOutputLength)
+	// Enforce LLM output length from rules validation if specified
+	if appConfig.Rules.PromptValidation.MaxOutputLength > 0 {
+		retryParser.SetMaxOutputLength(appConfig.Rules.PromptValidation.MaxOutputLength)
 	}
 
 	// Parser preferences based on OutputParser using factory
@@ -367,7 +367,7 @@ func NewGenAIProcessorFromConfig(appConfig *config.AppConfig) (*GenAIProcessor, 
 		providerTimeout:  mc.Timeout,
 		retryAttempts:    mc.RetryAttempts,
 		retryDelay:       mc.RetryDelay,
-		promptValidation: appConfig.Prompts.Validation,
+		promptValidation: appConfig.Rules.PromptValidation,
 	}
 
 	return proc, nil
@@ -407,8 +407,8 @@ func (p *GenAIProcessor) ProcessQuery(ctx context.Context, req *types.Processing
 	startTime := time.Now()
 	p.logger.Printf("Starting query processing for session: %s", req.SessionID)
 
-	// Step 0: Enforce configured input length from prompts validation (if available)
-	// Enforce max input length from prompts validation if configured on processor
+	// Step 0: Enforce configured input length from rules validation (if available)
+	// Enforce max input length from rules validation if configured on processor
 	if p.promptValidation.MaxInputLength > 0 && len(req.Query) > p.promptValidation.MaxInputLength {
 		req.Query = req.Query[:p.promptValidation.MaxInputLength]
 	}
@@ -555,7 +555,7 @@ func (p *GenAIProcessor) ProcessQuery(ctx context.Context, req *types.Processing
 		return p.createErrorResponse("normalization_failed", err), nil
 	}
 
-	// Step 7a: Enhanced prompt validation required fields
+	// Step 7a: Enhanced rules validation required fields
 	if sq := structuredQuery; sq != nil {
 		for _, rf := range p.promptValidation.RequiredFields {
 			switch strings.ToLower(rf) {

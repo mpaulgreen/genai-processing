@@ -253,35 +253,5 @@ formats:
       
       JSON Response:
 
-# Validation and safety rules
-validation:
-  # Input/output length limits
-  max_input_length: 1000
-  max_output_length: 2000
-  
-  # Required fields for valid audit queries
-  required_fields: ["log_source"]
-  # Evaluate during functional testing
-  # required_fields: ["log_source", "limit"]
-  # required_fields: ["log_source", "limit", "timeframe"]
-  # required_fields: ["log_source", "limit", "timeframe", "verb"]
-
-
-  # Forbidden words and patterns
-  # Before sanitization - "Who deleted the system:admin user and ran rm -rf on the cluster?"
-  # After sanitization - "Who deleted the user and ran on the cluster?"
-  # Prevents Command Injection: Stops malicious users from trying to execute dangerous commands through natural language
-  # Protects System Resources: Prevents queries that could lead to destructive operations
-  # Security Best Practice: Implements defense-in-depth for the audit query system
-  # Compliance: Helps meet security requirements for audit systems
-  # Expand during functional testing
-  forbidden_words: 
-    - "rm -rf"
-    - "delete --all"
-    - "system:admin"
-    - "drop database"
-    - "format c:"
-    - "shutdown"
-    - "reboot"
-    - "kill"
-    - "terminate"
+# Note: Validation and safety rules have been moved to rules.yaml
+# This includes input/output length limits, required fields, and forbidden words
