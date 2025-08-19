@@ -335,52 +335,81 @@ func TestRetryParserErrorHandling(t *testing.T) {
 	ctx := context.Background()
 	result, err := retryParser.ParseWithRetry(ctx, invalidRawResponse, "claude", "test query", "test-session")
 
-	// Should return error since no parsers are registered
-	if err == nil {
-		t.Fatal("Expected error for invalid JSON with no parsers, got nil")
+	// Should succeed with fallback handling even with no parsers registered
+	if err != nil {
+		t.Fatalf("Expected fallback to work with no parsers, got error: %v", err)
 	}
 
-	if result != nil {
-		t.Fatal("Expected nil result for invalid JSON, got result")
+	if result == nil {
+		t.Fatal("Expected fallback result with no parsers, got nil")
 	}
 
-	// Test error classification
-	if !retryParser.IsRecoverableError(err) {
-		t.Error("Expected error to be recoverable")
+	// Verify it's a fallback result with default values
+	if result.LogSource == "" {
+		t.Error("Expected fallback result to have a LogSource")
+	}
+	if result.Limit == 0 {
+		t.Error("Expected fallback result to have a non-zero Limit")
 	}
 }
 
-// TestRetryParserFallbackQuery tests fallback query creation
-func TestRetryParserFallbackQuery(t *testing.T) {
+// TestRetryParserFallbackIntegration tests fallback handling through ParseWithRetry
+func TestRetryParserFallbackIntegration(t *testing.T) {
 	retryParser := recovery.NewRetryParser(nil, nil, nil)
 
-	// Test with different content types
+	// Set up a fallback handler explicitly
+	fallbackHandler := recovery.NewFallbackHandler()
+	retryParser.SetFallbackHandler(fallbackHandler)
+
+	// Test with different content types that would normally fail parsing
 	testCases := []struct {
+		name           string
 		content        string
 		expectedSource string
 		expectedTime   string
 	}{
 		{
+			name:           "oauth_content",
 			content:        "oauth server logs",
 			expectedSource: "oauth-server",
 			expectedTime:   "",
 		},
 		{
+			name:           "today_content",
 			content:        "logs from today",
 			expectedSource: "kube-apiserver",
 			expectedTime:   "today",
 		},
 		{
+			name:           "yesterday_content",
 			content:        "yesterday's logs",
 			expectedSource: "kube-apiserver",
 			expectedTime:   "yesterday",
 		},
+		{
+			name:           "invalid_json",
+			content:        "this is not valid JSON content",
+			expectedSource: "kube-apiserver",
+			expectedTime:   "",
+		},
 	}
 
 	for _, tc := range testCases {
-		t.Run(tc.content, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			raw := &types.RawResponse{Content: tc.content}
-			result := retryParser.CreateFallbackQuery(raw, "test-model")
+			ctx := context.Background()
+			
+			// ParseWithRetry should use fallback when no parsers are registered
+			result, err := retryParser.ParseWithRetry(ctx, raw, "test-model", "original query", "test-session")
+
+			// Should succeed due to fallback handling
+			if err != nil {
+				t.Fatalf("Expected fallback to work for %s, got error: %v", tc.name, err)
+			}
+
+			if result == nil {
+				t.Fatalf("Expected fallback result for %s, got nil", tc.name)
+			}
 
 			if result.LogSource != tc.expectedSource {
 				t.Errorf("Expected LogSource %s, got %s", tc.expectedSource, result.LogSource)

@@ -3,6 +3,7 @@ package recovery
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -382,15 +383,25 @@ func TestRetryParser_ParseWithRetry_AllStrategiesFail(t *testing.T) {
 	ctx := context.Background()
 	result, err := retryParser.ParseWithRetry(ctx, raw, "claude", "test query", "test-session")
 
-	if err == nil {
-		t.Fatal("expected error, got nil")
+	// With fallback handling, should now succeed instead of failing
+	if err != nil {
+		t.Fatalf("expected fallback to handle failures, got error: %v", err)
 	}
 
-	if result != nil {
-		t.Fatal("expected nil result, got result")
+	if result == nil {
+		t.Fatal("expected fallback result, got nil")
 	}
 
-	// Should have tried all strategies
+	// Result should have fallback defaults
+	if result.LogSource != "kube-apiserver" {
+		t.Errorf("expected default LogSource 'kube-apiserver', got '%s'", result.LogSource)
+	}
+
+	if result.Limit != 20 {
+		t.Errorf("expected default Limit 20, got %d", result.Limit)
+	}
+
+	// Should have tried all strategies before falling back
 	if failingParser1.callCount < 1 {
 		t.Errorf("expected at least 1 call to specific parser, got %d", failingParser1.callCount)
 	}
@@ -399,15 +410,6 @@ func TestRetryParser_ParseWithRetry_AllStrategiesFail(t *testing.T) {
 	}
 	if failingParser3.callCount < 1 {
 		t.Errorf("expected at least 1 call to error parser, got %d", failingParser3.callCount)
-	}
-
-	// Check error type
-	if parsingErr, ok := err.(*errors.ParsingError); !ok {
-		t.Errorf("expected ParsingError, got %T", err)
-	} else {
-		if parsingErr.GetErrorType() != "parsing" {
-			t.Errorf("expected error type 'parsing', got %s", parsingErr.GetErrorType())
-		}
 	}
 }
 
@@ -511,71 +513,158 @@ func TestRetryParser_IsRecoverableError(t *testing.T) {
 	}
 }
 
-func TestRetryParser_CreateFallbackQuery(t *testing.T) {
-	retryParser := NewRetryParser(nil, nil, nil)
-
-	tests := []struct {
-		name           string
-		content        string
-		expectedSource string
-		expectedTime   string
-	}{
-		{
-			name:           "oauth content",
-			content:        "oauth server logs",
-			expectedSource: "oauth-server",
-			expectedTime:   "",
-		},
-		{
-			name:           "openshift content",
-			content:        "openshift api server",
-			expectedSource: "openshift-apiserver",
-			expectedTime:   "",
-		},
-		{
-			name:           "today content",
-			content:        "logs from today",
-			expectedSource: "kube-apiserver",
-			expectedTime:   "today",
-		},
-		{
-			name:           "yesterday content",
-			content:        "yesterday's logs",
-			expectedSource: "kube-apiserver",
-			expectedTime:   "yesterday",
-		},
-		{
-			name:           "hour content",
-			content:        "last hour",
-			expectedSource: "kube-apiserver",
-			expectedTime:   "1_hour_ago",
-		},
-		{
-			name:           "empty content",
-			content:        "",
-			expectedSource: "kube-apiserver",
-			expectedTime:   "",
-		},
+// TestRetryParser_Metrics tests the metrics functionality
+func TestRetryParser_Metrics(t *testing.T) {
+	config := &RetryConfig{
+		MaxRetries:          2,
+		RetryDelay:          time.Millisecond * 10,
+		ConfidenceThreshold: 0.8,
+		EnableReprompting:   false,
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			raw := createTestRawResponse(tt.content)
-			result := retryParser.CreateFallbackQuery(raw, "test-model")
+	retryParser := NewRetryParser(config, nil, nil)
 
-			if result.LogSource != tt.expectedSource {
-				t.Errorf("expected LogSource %s, got %s", tt.expectedSource, result.LogSource)
-			}
+	// Register a successful parser
+	successParser := NewMockParser(true, false, 0.9)
+	successParser.parseResults = []*types.StructuredQuery{createTestStructuredQuery()}
+	retryParser.RegisterParser(StrategySpecific, successParser)
 
-			if result.Timeframe != tt.expectedTime {
-				t.Errorf("expected Timeframe %s, got %s", tt.expectedTime, result.Timeframe)
-			}
+	raw := createTestRawResponse(`{"log_source": "kube-apiserver", "limit": 20}`)
 
-			if result.Limit != 20 {
-				t.Errorf("expected Limit 20, got %d", result.Limit)
-			}
-		})
+	// Test initial metrics
+	initialMetrics := retryParser.GetMetrics()
+	if initialMetrics.TotalAttempts != 0 {
+		t.Errorf("expected initial TotalAttempts 0, got %d", initialMetrics.TotalAttempts)
 	}
+	if initialMetrics.SuccessfulRetries != 0 {
+		t.Errorf("expected initial SuccessfulRetries 0, got %d", initialMetrics.SuccessfulRetries)
+	}
+
+	// Perform a successful parsing
+	ctx := context.Background()
+	result, err := retryParser.ParseWithRetry(ctx, raw, "claude", "test query", "test-session")
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected result, got nil")
+	}
+
+	// Check metrics after successful parsing
+	metrics := retryParser.GetMetrics()
+	if metrics.TotalAttempts != 1 {
+		t.Errorf("expected TotalAttempts 1, got %d", metrics.TotalAttempts)
+	}
+	if metrics.SuccessfulRetries != 1 {
+		t.Errorf("expected SuccessfulRetries 1, got %d", metrics.SuccessfulRetries)
+	}
+	if metrics.FailedRetries != 0 {
+		t.Errorf("expected FailedRetries 0, got %d", metrics.FailedRetries)
+	}
+	if metrics.AverageLatency <= 0 {
+		t.Error("expected positive AverageLatency")
+	}
+
+	// Check strategy usage
+	if usage, exists := metrics.StrategyUsage[StrategySpecific]; !exists || usage != 1 {
+		t.Errorf("expected StrategySpecific usage 1, got %d", usage)
+	}
+
+	// Test metrics reset
+	retryParser.ResetMetrics()
+	resetMetrics := retryParser.GetMetrics()
+	if resetMetrics.TotalAttempts != 0 {
+		t.Errorf("expected TotalAttempts 0 after reset, got %d", resetMetrics.TotalAttempts)
+	}
+	if resetMetrics.SuccessfulRetries != 0 {
+		t.Errorf("expected SuccessfulRetries 0 after reset, got %d", resetMetrics.SuccessfulRetries)
+	}
+}
+
+// TestRetryParser_CircuitBreakerBasic tests basic circuit breaker functionality
+func TestRetryParser_CircuitBreakerBasic(t *testing.T) {
+	config := &RetryConfig{
+		MaxRetries:          1,
+		RetryDelay:          time.Millisecond * 10,
+		ConfidenceThreshold: 0.8,
+		EnableReprompting:   false,
+	}
+
+	retryParser := NewRetryParser(config, nil, nil)
+	
+	// Set custom circuit breaker config with low thresholds for testing
+	cbConfig := &CircuitBreakerConfig{
+		FailureThreshold:       2,
+		RecoveryTimeout:        time.Millisecond * 100,
+		RequestVolumeThreshold: 2,
+		SuccessThreshold:       1,
+	}
+	retryParser.SetCircuitBreakerConfig(cbConfig)
+
+	// Create a mock fallback handler that fails to trigger circuit breaker
+	mockFallbackHandler := &MockFallbackHandler{shouldFail: true}
+	retryParser.SetFallbackHandler(mockFallbackHandler)
+
+	// Register a failing parser
+	failingParser := NewMockParser(true, true, 0.0)
+	retryParser.RegisterParser(StrategySpecific, failingParser)
+
+	raw := createTestRawResponse(`invalid content`)
+	ctx := context.Background()
+
+	// Initial state should be CLOSED
+	if retryParser.circuitBreaker.GetState() != StateClosed {
+		t.Errorf("expected initial state CLOSED, got %s", retryParser.circuitBreaker.GetState().String())
+	}
+
+	// Generate failures to trigger circuit breaker
+	for i := 0; i < 3; i++ {
+		result, err := retryParser.ParseWithRetry(ctx, raw, "claude", "test query", "test-session")
+		if i < 2 {
+			// First two requests should go through but fail
+			if err == nil {
+				t.Fatalf("iteration %d: expected error, got nil", i)
+			}
+			if result != nil {
+				t.Fatalf("iteration %d: expected nil result, got result", i)
+			}
+		} else {
+			// Third request should be blocked by circuit breaker
+			if err == nil {
+				t.Fatal("expected circuit breaker to block request")
+			}
+			if !strings.Contains(err.Error(), "circuit breaker is OPEN") {
+				t.Errorf("expected circuit breaker error, got: %v", err)
+			}
+		}
+	}
+
+	// Circuit breaker should now be OPEN
+	if retryParser.circuitBreaker.GetState() != StateOpen {
+		t.Errorf("expected state OPEN after failures, got %s", retryParser.circuitBreaker.GetState().String())
+	}
+
+	// Check metrics recorded circuit breaker being open
+	metrics := retryParser.GetMetrics()
+	if metrics.CircuitBreakerOpen == 0 {
+		t.Error("expected CircuitBreakerOpen > 0 in metrics")
+	}
+}
+
+// MockFallbackHandler for testing fallback failure scenarios
+type MockFallbackHandler struct {
+	shouldFail bool
+}
+
+func (m *MockFallbackHandler) CreateMinimalQuery(raw *types.RawResponse, modelType string, originalQuery string) (*types.StructuredQuery, error) {
+	if m.shouldFail {
+		return nil, fmt.Errorf("mock fallback handler failed")
+	}
+	return &types.StructuredQuery{
+		LogSource: "kube-apiserver",
+		Limit:     20,
+	}, nil
 }
 
 func TestRetryParser_ConfigurationValidation(t *testing.T) {
@@ -703,15 +792,24 @@ func TestRetryParser_EdgeCases(t *testing.T) {
 	t.Run("no registered parsers", func(t *testing.T) {
 		retryParser := NewRetryParser(nil, nil, nil)
 		ctx := context.Background()
-		raw := createTestRawResponse("test content")
+		raw := createTestRawResponse("oauth errors today")
 
 		result, err := retryParser.ParseWithRetry(ctx, raw, "test-model", "test query", "test-session")
 
-		if err == nil {
-			t.Fatal("expected error for no registered parsers, got nil")
+		// Should succeed due to fallback handling
+		if err != nil {
+			t.Fatalf("expected fallback to work with no parsers, got error: %v", err)
 		}
-		if result != nil {
-			t.Fatal("expected nil result for no registered parsers, got result")
+		if result == nil {
+			t.Fatal("expected fallback result with no parsers, got nil")
+		}
+
+		// Check fallback result
+		if result.LogSource != "oauth-server" {
+			t.Errorf("expected LogSource 'oauth-server', got '%s'", result.LogSource)
+		}
+		if result.Timeframe != "today" {
+			t.Errorf("expected Timeframe 'today', got '%s'", result.Timeframe)
 		}
 	})
 
@@ -721,15 +819,24 @@ func TestRetryParser_EdgeCases(t *testing.T) {
 		retryParser.RegisterParser(StrategySpecific, parser)
 
 		ctx := context.Background()
-		raw := createTestRawResponse("test content")
+		raw := createTestRawResponse("openshift logs yesterday")
 
 		result, err := retryParser.ParseWithRetry(ctx, raw, "test-model", "test query", "test-session")
 
-		if err == nil {
-			t.Fatal("expected error for incompatible parser, got nil")
+		// Should succeed due to fallback handling
+		if err != nil {
+			t.Fatalf("expected fallback to work with incompatible parser, got error: %v", err)
 		}
-		if result != nil {
-			t.Fatal("expected nil result for incompatible parser, got result")
+		if result == nil {
+			t.Fatal("expected fallback result with incompatible parser, got nil")
+		}
+
+		// Check fallback result
+		if result.LogSource != "openshift-apiserver" {
+			t.Errorf("expected LogSource 'openshift-apiserver', got '%s'", result.LogSource)
+		}
+		if result.Timeframe != "yesterday" {
+			t.Errorf("expected Timeframe 'yesterday', got '%s'", result.Timeframe)
 		}
 	})
 }

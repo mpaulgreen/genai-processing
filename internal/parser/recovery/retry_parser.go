@@ -3,7 +3,9 @@ package recovery
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"genai-processing/pkg/errors"
@@ -55,6 +57,88 @@ type RetryResult struct {
 	Duration time.Duration `json:"duration"`
 }
 
+// RetryMetrics tracks operational statistics for the retry parser.
+type RetryMetrics struct {
+	// Counters
+	TotalAttempts     int64 `json:"total_attempts"`
+	SuccessfulRetries int64 `json:"successful_retries"`
+	FailedRetries     int64 `json:"failed_retries"`
+	FallbackUsed      int64 `json:"fallback_used"`
+	CircuitBreakerOpen int64 `json:"circuit_breaker_open"`
+
+	// Strategy Usage
+	StrategyUsage       map[RetryStrategy]int64   `json:"strategy_usage"`
+	StrategySuccessRate map[RetryStrategy]float64 `json:"strategy_success_rate"`
+
+	// Performance Metrics
+	TotalDuration    time.Duration `json:"total_duration"`
+	AverageLatency   time.Duration `json:"average_latency"`
+	latencyHistory   []time.Duration // for percentile calculations
+	P95Latency       time.Duration `json:"p95_latency"`
+	P99Latency       time.Duration `json:"p99_latency"`
+
+	// Error Patterns
+	ErrorTypes        map[string]int64 `json:"error_types"`
+	ModelTypeFailures map[string]int64 `json:"model_type_failures"`
+
+	// Time-based metrics
+	RequestsPerSecond float64   `json:"requests_per_second"`
+	LastResetTime     time.Time `json:"last_reset_time"`
+	StartTime         time.Time `json:"start_time"`
+
+	// Synchronization
+	mutex sync.RWMutex
+}
+
+// CircuitBreakerState represents the current state of the circuit breaker.
+type CircuitBreakerState int
+
+const (
+	// StateClosed - Normal operation, requests pass through
+	StateClosed CircuitBreakerState = iota
+	// StateOpen - Requests fail fast, no calls made
+	StateOpen
+	// StateHalfOpen - Test requests allowed to check recovery
+	StateHalfOpen
+)
+
+// String returns the string representation of the circuit breaker state.
+func (s CircuitBreakerState) String() string {
+	switch s {
+	case StateClosed:
+		return "CLOSED"
+	case StateOpen:
+		return "OPEN"
+	case StateHalfOpen:
+		return "HALF_OPEN"
+	default:
+		return "UNKNOWN"
+	}
+}
+
+// CircuitBreakerConfig configures the circuit breaker behavior.
+type CircuitBreakerConfig struct {
+	// FailureThreshold is the number of failures required to open the circuit
+	FailureThreshold int `json:"failure_threshold"`
+	// RecoveryTimeout is the time to wait before transitioning to half-open
+	RecoveryTimeout time.Duration `json:"recovery_timeout"`
+	// RequestVolumeThreshold is the minimum number of requests before evaluation
+	RequestVolumeThreshold int `json:"request_volume_threshold"`
+	// SuccessThreshold is the number of successes needed to close the circuit
+	SuccessThreshold int `json:"success_threshold"`
+}
+
+// CircuitBreaker tracks failures and manages state transitions.
+type CircuitBreaker struct {
+	config       *CircuitBreakerConfig
+	state        CircuitBreakerState
+	failures     int
+	successes    int
+	requests     int
+	lastFailTime time.Time
+	mutex        sync.RWMutex
+}
+
 // RetryParser implements retry logic for handling parsing failures.
 // It provides multiple parsing strategies and fallback mechanisms.
 type RetryParser struct {
@@ -72,6 +156,11 @@ type RetryParser struct {
 
 	// optional fallback handler to create a minimal query when all strategies fail
 	fallbackHandler interfaces.FallbackHandler
+
+	// metrics tracks operational statistics
+	metrics *RetryMetrics
+	// circuitBreaker prevents cascading failures
+	circuitBreaker *CircuitBreaker
 }
 
 // NewRetryParser creates a new RetryParser with the given configuration.
@@ -91,6 +180,8 @@ func NewRetryParser(config *RetryConfig, llmEngine interfaces.LLMEngine, context
 		parsers:        make(map[RetryStrategy]interfaces.Parser),
 		llmEngine:      llmEngine,
 		contextManager: contextManager,
+		metrics:        NewRetryMetrics(),
+		circuitBreaker: NewCircuitBreaker(nil),
 	}
 }
 
@@ -105,11 +196,348 @@ func (r *RetryParser) RegisterParser(strategy RetryStrategy, parser interfaces.P
 	r.parsers[strategy] = parser
 }
 
+// NewRetryMetrics creates a new RetryMetrics instance.
+func NewRetryMetrics() *RetryMetrics {
+	now := time.Now()
+	return &RetryMetrics{
+		StrategyUsage:       make(map[RetryStrategy]int64),
+		StrategySuccessRate: make(map[RetryStrategy]float64),
+		ErrorTypes:          make(map[string]int64),
+		ModelTypeFailures:   make(map[string]int64),
+		latencyHistory:      make([]time.Duration, 0, 1000), // keep last 1000 latencies
+		LastResetTime:       now,
+		StartTime:           now,
+	}
+}
+
+// NewCircuitBreaker creates a new CircuitBreaker with the given configuration.
+func NewCircuitBreaker(config *CircuitBreakerConfig) *CircuitBreaker {
+	if config == nil {
+		config = &CircuitBreakerConfig{
+			FailureThreshold:       5,
+			RecoveryTimeout:        time.Second * 30,
+			RequestVolumeThreshold: 10,
+			SuccessThreshold:       3,
+		}
+	}
+
+	return &CircuitBreaker{
+		config: config,
+		state:  StateClosed,
+	}
+}
+
+// SetCircuitBreakerConfig updates the circuit breaker configuration.
+func (r *RetryParser) SetCircuitBreakerConfig(config *CircuitBreakerConfig) {
+	if config != nil {
+		r.circuitBreaker.config = config
+	}
+}
+
+// GetMetrics returns a copy of the current metrics.
+func (r *RetryParser) GetMetrics() *RetryMetrics {
+	r.metrics.mutex.RLock()
+	defer r.metrics.mutex.RUnlock()
+
+	// Create a deep copy of metrics
+	metricsCopy := &RetryMetrics{
+		TotalAttempts:       r.metrics.TotalAttempts,
+		SuccessfulRetries:   r.metrics.SuccessfulRetries,
+		FailedRetries:       r.metrics.FailedRetries,
+		FallbackUsed:        r.metrics.FallbackUsed,
+		CircuitBreakerOpen:  r.metrics.CircuitBreakerOpen,
+		TotalDuration:       r.metrics.TotalDuration,
+		AverageLatency:      r.metrics.AverageLatency,
+		P95Latency:          r.metrics.P95Latency,
+		P99Latency:          r.metrics.P99Latency,
+		RequestsPerSecond:   r.metrics.RequestsPerSecond,
+		LastResetTime:       r.metrics.LastResetTime,
+		StartTime:           r.metrics.StartTime,
+		StrategyUsage:       make(map[RetryStrategy]int64),
+		StrategySuccessRate: make(map[RetryStrategy]float64),
+		ErrorTypes:          make(map[string]int64),
+		ModelTypeFailures:   make(map[string]int64),
+	}
+
+	// Copy maps
+	for k, v := range r.metrics.StrategyUsage {
+		metricsCopy.StrategyUsage[k] = v
+	}
+	for k, v := range r.metrics.StrategySuccessRate {
+		metricsCopy.StrategySuccessRate[k] = v
+	}
+	for k, v := range r.metrics.ErrorTypes {
+		metricsCopy.ErrorTypes[k] = v
+	}
+	for k, v := range r.metrics.ModelTypeFailures {
+		metricsCopy.ModelTypeFailures[k] = v
+	}
+
+	return metricsCopy
+}
+
+// ResetMetrics resets all metrics to zero.
+func (r *RetryParser) ResetMetrics() {
+	r.metrics.mutex.Lock()
+	defer r.metrics.mutex.Unlock()
+
+	now := time.Now()
+	r.metrics.TotalAttempts = 0
+	r.metrics.SuccessfulRetries = 0
+	r.metrics.FailedRetries = 0
+	r.metrics.FallbackUsed = 0
+	r.metrics.CircuitBreakerOpen = 0
+	r.metrics.TotalDuration = 0
+	r.metrics.AverageLatency = 0
+	r.metrics.P95Latency = 0
+	r.metrics.P99Latency = 0
+	r.metrics.RequestsPerSecond = 0
+	r.metrics.LastResetTime = now
+	r.metrics.latencyHistory = r.metrics.latencyHistory[:0]
+
+	// Clear maps
+	for k := range r.metrics.StrategyUsage {
+		delete(r.metrics.StrategyUsage, k)
+	}
+	for k := range r.metrics.StrategySuccessRate {
+		delete(r.metrics.StrategySuccessRate, k)
+	}
+	for k := range r.metrics.ErrorTypes {
+		delete(r.metrics.ErrorTypes, k)
+	}
+	for k := range r.metrics.ModelTypeFailures {
+		delete(r.metrics.ModelTypeFailures, k)
+	}
+}
+
+// recordAttempt records metrics for a retry attempt.
+func (r *RetryParser) recordAttempt(strategy RetryStrategy, modelType string, duration time.Duration, success bool, err error) {
+	r.metrics.mutex.Lock()
+	defer r.metrics.mutex.Unlock()
+
+	r.metrics.TotalAttempts++
+	r.metrics.StrategyUsage[strategy]++
+	r.metrics.TotalDuration += duration
+
+	// Record latency
+	r.metrics.latencyHistory = append(r.metrics.latencyHistory, duration)
+	if len(r.metrics.latencyHistory) > 1000 {
+		// Keep only the most recent 1000 latencies
+		copy(r.metrics.latencyHistory, r.metrics.latencyHistory[1:])
+		r.metrics.latencyHistory = r.metrics.latencyHistory[:999]
+	}
+
+	if success {
+		r.metrics.SuccessfulRetries++
+	} else {
+		r.metrics.FailedRetries++
+		r.metrics.ModelTypeFailures[modelType]++
+		if err != nil {
+			r.metrics.ErrorTypes[err.Error()]++
+		}
+	}
+
+	// Update derived metrics
+	r.updateDerivedMetrics()
+}
+
+// recordFallbackUsed records when fallback handling is used.
+func (r *RetryParser) recordFallbackUsed() {
+	r.metrics.mutex.Lock()
+	defer r.metrics.mutex.Unlock()
+	r.metrics.FallbackUsed++
+}
+
+// recordCircuitBreakerOpen records when circuit breaker blocks a request.
+func (r *RetryParser) recordCircuitBreakerOpen() {
+	r.metrics.mutex.Lock()
+	defer r.metrics.mutex.Unlock()
+	r.metrics.CircuitBreakerOpen++
+}
+
+// updateDerivedMetrics updates calculated metrics (must be called with lock held).
+func (r *RetryParser) updateDerivedMetrics() {
+	// Update average latency
+	if r.metrics.TotalAttempts > 0 {
+		r.metrics.AverageLatency = r.metrics.TotalDuration / time.Duration(r.metrics.TotalAttempts)
+	}
+
+	// Update requests per second
+	elapsed := time.Since(r.metrics.StartTime)
+	if elapsed > 0 {
+		r.metrics.RequestsPerSecond = float64(r.metrics.TotalAttempts) / elapsed.Seconds()
+	}
+
+	// Update strategy success rates
+	for strategy := range r.metrics.StrategyUsage {
+		total := r.metrics.StrategyUsage[strategy]
+		if total > 0 {
+			// Calculate success rate for this strategy (simplified for now)
+			successRate := float64(r.metrics.SuccessfulRetries) / float64(r.metrics.TotalAttempts)
+			r.metrics.StrategySuccessRate[strategy] = successRate
+		}
+	}
+
+	// Update percentile latencies
+	r.updateLatencyPercentiles()
+}
+
+// updateLatencyPercentiles calculates P95 and P99 latencies.
+func (r *RetryParser) updateLatencyPercentiles() {
+	if len(r.metrics.latencyHistory) == 0 {
+		return
+	}
+
+	// Create a sorted copy
+	sorted := make([]time.Duration, len(r.metrics.latencyHistory))
+	copy(sorted, r.metrics.latencyHistory)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i] < sorted[j]
+	})
+
+	length := len(sorted)
+	if length > 0 {
+		p95Index := int(float64(length) * 0.95)
+		if p95Index >= length {
+			p95Index = length - 1
+		}
+		r.metrics.P95Latency = sorted[p95Index]
+
+		p99Index := int(float64(length) * 0.99)
+		if p99Index >= length {
+			p99Index = length - 1
+		}
+		r.metrics.P99Latency = sorted[p99Index]
+	}
+}
+
+// AllowRequest checks if the circuit breaker allows the request to proceed.
+func (cb *CircuitBreaker) AllowRequest() bool {
+	cb.mutex.Lock()
+	defer cb.mutex.Unlock()
+
+	switch cb.state {
+	case StateClosed:
+		return true
+	case StateOpen:
+		// Check if recovery timeout has passed
+		if time.Since(cb.lastFailTime) > cb.config.RecoveryTimeout {
+			cb.state = StateHalfOpen
+			cb.successes = 0
+			cb.requests = 0
+			return true
+		}
+		return false
+	case StateHalfOpen:
+		return true
+	default:
+		return false
+	}
+}
+
+// RecordSuccess records a successful operation.
+func (cb *CircuitBreaker) RecordSuccess() {
+	cb.mutex.Lock()
+	defer cb.mutex.Unlock()
+
+	cb.requests++
+
+	if cb.state == StateHalfOpen {
+		cb.successes++
+		if cb.successes >= cb.config.SuccessThreshold {
+			// Enough successes to close the circuit
+			cb.state = StateClosed
+			cb.failures = 0
+			cb.successes = 0
+			cb.requests = 0
+		}
+	}
+}
+
+// RecordFailure records a failed operation.
+func (cb *CircuitBreaker) RecordFailure() {
+	cb.mutex.Lock()
+	defer cb.mutex.Unlock()
+
+	cb.failures++
+	cb.requests++
+	cb.lastFailTime = time.Now()
+
+	if cb.state == StateHalfOpen {
+		// Failure during recovery - back to open
+		cb.state = StateOpen
+		cb.failures = 0
+		cb.successes = 0
+		cb.requests = 0
+		return
+	}
+
+	// Check if we should open the circuit
+	if cb.requests >= cb.config.RequestVolumeThreshold &&
+		cb.failures >= cb.config.FailureThreshold {
+		cb.state = StateOpen
+		cb.failures = 0
+		cb.successes = 0
+		cb.requests = 0
+	}
+}
+
+// GetState returns the current circuit breaker state.
+func (cb *CircuitBreaker) GetState() CircuitBreakerState {
+	cb.mutex.RLock()
+	defer cb.mutex.RUnlock()
+	return cb.state
+}
+
+// GetStats returns circuit breaker statistics.
+func (cb *CircuitBreaker) GetStats() map[string]interface{} {
+	cb.mutex.RLock()
+	defer cb.mutex.RUnlock()
+
+	return map[string]interface{}{
+		"state":                    cb.state.String(),
+		"failures":                 cb.failures,
+		"successes":                cb.successes,
+		"requests":                 cb.requests,
+		"failure_threshold":        cb.config.FailureThreshold,
+		"recovery_timeout":         cb.config.RecoveryTimeout.String(),
+		"request_volume_threshold": cb.config.RequestVolumeThreshold,
+		"success_threshold":        cb.config.SuccessThreshold,
+		"last_fail_time":           cb.lastFailTime,
+	}
+}
+
+// Reset resets the circuit breaker to its initial state.
+func (cb *CircuitBreaker) Reset() {
+	cb.mutex.Lock()
+	defer cb.mutex.Unlock()
+
+	cb.state = StateClosed
+	cb.failures = 0
+	cb.successes = 0
+	cb.requests = 0
+	cb.lastFailTime = time.Time{}
+}
+
 // ParseWithRetry attempts to parse a response using multiple strategies with retry logic.
 // It implements a fallback chain: specific → generic → error.
 func (r *RetryParser) ParseWithRetry(ctx context.Context, raw *types.RawResponse, modelType string, originalQuery string, sessionID string) (*types.StructuredQuery, error) {
+	startTime := time.Now()
+	
 	if raw == nil {
 		return nil, errors.NewParsingError("raw response is nil", errors.ComponentParser, "retry_parser", 0.0, "")
+	}
+
+	// Check circuit breaker before attempting parsing
+	if !r.circuitBreaker.AllowRequest() {
+		r.recordCircuitBreakerOpen()
+		return nil, errors.NewParsingError(
+			"circuit breaker is OPEN - service temporarily unavailable",
+			errors.ComponentParser,
+			"retry_parser_circuit_breaker",
+			0.0,
+			raw.Content,
+		)
 	}
 
 	// Enforce maximum output length if configured
@@ -134,6 +562,9 @@ func (r *RetryParser) ParseWithRetry(ctx context.Context, raw *types.RawResponse
 
 			// If we have a successful result above threshold, return it
 			if result.Success && result.Confidence >= r.config.ConfidenceThreshold {
+				duration := time.Since(startTime)
+				r.recordAttempt(strategy, modelType, duration, true, nil)
+				r.circuitBreaker.RecordSuccess()
 				return result.Query, nil
 			}
 
@@ -146,6 +577,9 @@ func (r *RetryParser) ParseWithRetry(ctx context.Context, raw *types.RawResponse
 			if result.Success && result.Confidence < r.config.ConfidenceThreshold && r.config.EnableReprompting {
 				if repromptResult := r.tryReprompting(ctx, raw, modelType, originalQuery, sessionID, result); repromptResult != nil {
 					if repromptResult.Success && repromptResult.Confidence >= r.config.ConfidenceThreshold {
+						duration := time.Since(startTime)
+						r.recordAttempt(strategy, modelType, duration, true, nil)
+						r.circuitBreaker.RecordSuccess()
 						return repromptResult.Query, nil
 					}
 					if repromptResult.Confidence > bestResult.Confidence {
@@ -168,22 +602,46 @@ func (r *RetryParser) ParseWithRetry(ctx context.Context, raw *types.RawResponse
 
 	// If we have a best result, return it even if below threshold
 	if bestResult != nil && bestResult.Success {
+		duration := time.Since(startTime)
+		r.recordAttempt(bestResult.Strategy, modelType, duration, true, nil)
+		r.circuitBreaker.RecordSuccess()
 		return bestResult.Query, nil
 	}
 
-	// Use fallback handler if configured
+	// Use fallback handler if configured and available
 	if r.fallbackHandler != nil {
 		if fallback, ferr := r.fallbackHandler.CreateMinimalQuery(raw, modelType, originalQuery); ferr == nil && fallback != nil {
+			duration := time.Since(startTime)
+			r.recordFallbackUsed()
+			r.recordAttempt("fallback", modelType, duration, true, nil)
+			r.circuitBreaker.RecordSuccess()
 			return fallback, nil
 		}
 	}
 
+	// If no fallback handler is configured, use a default one
+	if r.fallbackHandler == nil {
+		defaultHandler := NewFallbackHandler()
+		if fallback, ferr := defaultHandler.CreateMinimalQuery(raw, modelType, originalQuery); ferr == nil && fallback != nil {
+			duration := time.Since(startTime)
+			r.recordFallbackUsed()
+			r.recordAttempt("fallback", modelType, duration, true, nil)
+			r.circuitBreaker.RecordSuccess()
+			return fallback, nil
+		}
+	}
+
+	// All strategies failed - record failure and return error
+	duration := time.Since(startTime)
+	r.circuitBreaker.RecordFailure()
+	
 	// Return the last error or create a comprehensive error
 	if lastError != nil {
+		r.recordAttempt("all_strategies", modelType, duration, false, lastError)
 		return nil, lastError
 	}
 
-	return nil, errors.NewParsingError(
+	finalError := errors.NewParsingError(
 		"all parsing strategies failed after maximum retries",
 		errors.ComponentParser,
 		"retry_parser",
@@ -197,6 +655,9 @@ func (r *RetryParser) ParseWithRetry(ctx context.Context, raw *types.RawResponse
 			"Verify the response contains valid JSON",
 			"Review the model's output format",
 		)
+	
+	r.recordAttempt("all_strategies", modelType, duration, false, finalError)
+	return nil, finalError
 }
 
 // tryParseWithStrategy attempts to parse using a specific strategy.
@@ -353,15 +814,41 @@ func (r *RetryParser) tryReprompting(ctx context.Context, raw *types.RawResponse
 	return result
 }
 
-// GetRetryStatistics returns statistics about retry attempts.
+// GetRetryStatistics returns comprehensive statistics about retry attempts.
 func (r *RetryParser) GetRetryStatistics() map[string]interface{} {
-	return map[string]interface{}{
+	metrics := r.GetMetrics()
+	circuitBreakerStats := r.circuitBreaker.GetStats()
+
+	stats := map[string]interface{}{
+		// Configuration
 		"max_retries":           r.config.MaxRetries,
 		"retry_delay":           r.config.RetryDelay.String(),
 		"confidence_threshold":  r.config.ConfidenceThreshold,
 		"enable_reprompting":    r.config.EnableReprompting,
 		"registered_strategies": r.getRegisteredStrategies(),
+
+		// Metrics
+		"total_attempts":        metrics.TotalAttempts,
+		"successful_retries":    metrics.SuccessfulRetries,
+		"failed_retries":        metrics.FailedRetries,
+		"fallback_used":         metrics.FallbackUsed,
+		"circuit_breaker_open":  metrics.CircuitBreakerOpen,
+		"average_latency":       metrics.AverageLatency.String(),
+		"p95_latency":           metrics.P95Latency.String(),
+		"p99_latency":           metrics.P99Latency.String(),
+		"requests_per_second":   metrics.RequestsPerSecond,
+		"strategy_usage":        metrics.StrategyUsage,
+		"strategy_success_rate": metrics.StrategySuccessRate,
+		"error_types":           metrics.ErrorTypes,
+		"model_type_failures":   metrics.ModelTypeFailures,
+		"start_time":            metrics.StartTime,
+		"last_reset_time":       metrics.LastResetTime,
+
+		// Circuit Breaker
+		"circuit_breaker": circuitBreakerStats,
 	}
+
+	return stats
 }
 
 // getRegisteredStrategies returns a list of registered parsing strategies.
@@ -457,33 +944,3 @@ func (r *RetryParser) IsRecoverableError(err error) bool {
 	return false
 }
 
-// CreateFallbackQuery creates a minimal fallback query when all parsing strategies fail.
-func (r *RetryParser) CreateFallbackQuery(raw *types.RawResponse, modelType string) *types.StructuredQuery {
-	// Create a minimal query with basic information
-	fallbackQuery := &types.StructuredQuery{
-		LogSource: "kube-apiserver", // Default to most common source
-		Limit:     20,               // Conservative limit
-	}
-
-	// Try to extract any useful information from the raw content
-	content := raw.Content
-	if content != "" {
-		// Look for common patterns in the content
-		if strings.Contains(strings.ToLower(content), "oauth") {
-			fallbackQuery.LogSource = "oauth-server"
-		} else if strings.Contains(strings.ToLower(content), "openshift") {
-			fallbackQuery.LogSource = "openshift-apiserver"
-		}
-
-		// Try to extract timeframe information
-		if strings.Contains(content, "today") {
-			fallbackQuery.Timeframe = "today"
-		} else if strings.Contains(content, "yesterday") {
-			fallbackQuery.Timeframe = "yesterday"
-		} else if strings.Contains(content, "hour") {
-			fallbackQuery.Timeframe = "1_hour_ago"
-		}
-	}
-
-	return fallbackQuery
-}

@@ -469,12 +469,14 @@ func TestProcessQuery_ParsingFailure(t *testing.T) {
 		t.Fatal("Response should not be nil")
 	}
 
-	if response.Error == "" {
-		t.Error("Response should contain error information")
+	// With fallback handling, parsing failures should result in successful fallback
+	if response.Error != "" {
+		t.Errorf("Expected no error with fallback handling, got: %s", response.Error)
 	}
 
-	if !strings.Contains(response.Error, "parsing_failed") {
-		t.Errorf("Error should contain 'parsing_failed', got: %s", response.Error)
+	// Verify the response has a valid result from fallback
+	if response.StructuredQuery == nil {
+		t.Error("Expected fallback structured query, got nil")
 	}
 }
 
