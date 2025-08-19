@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,6 +18,7 @@ type MockLLMProvider struct {
 	response      *types.RawResponse
 	callCount     int
 	lastRequest   *types.ModelRequest
+	mu            sync.Mutex // Protect fields from concurrent access
 }
 
 func NewMockLLMProvider() *MockLLMProvider {
@@ -31,6 +33,9 @@ func NewMockLLMProvider() *MockLLMProvider {
 }
 
 func (m *MockLLMProvider) GenerateResponse(ctx context.Context, request *types.ModelRequest) (*types.RawResponse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	
 	m.callCount++
 	m.lastRequest = request
 
@@ -68,12 +73,20 @@ func (m *MockLLMProvider) ValidateConnection() error {
 	return nil
 }
 
+// GetCallCount returns the number of times GenerateResponse was called (thread-safe)
+func (m *MockLLMProvider) GetCallCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.callCount
+}
+
 // MockInputAdapter implements the InputAdapter interface for testing
 type MockInputAdapter struct {
 	shouldFail     bool
 	adaptedRequest *types.ModelRequest
 	callCount      int
 	lastRequest    *types.InternalRequest
+	mu             sync.Mutex // Protect fields from concurrent access
 }
 
 func NewMockInputAdapter() *MockInputAdapter {
@@ -91,6 +104,9 @@ func NewMockInputAdapter() *MockInputAdapter {
 }
 
 func (m *MockInputAdapter) AdaptRequest(req *types.InternalRequest) (*types.ModelRequest, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	
 	m.callCount++
 	m.lastRequest = req
 
@@ -112,6 +128,13 @@ func (m *MockInputAdapter) GetAPIParameters() map[string]interface{} {
 	return map[string]interface{}{
 		"test_param": "test_value",
 	}
+}
+
+// GetCallCount returns the number of times AdaptRequest was called (thread-safe)
+func (m *MockInputAdapter) GetCallCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.callCount
 }
 
 func TestNewLLMEngine(t *testing.T) {
@@ -464,12 +487,12 @@ func TestLLMEngine_ConcurrentAccess(t *testing.T) {
 
 	// Verify total calls
 	expectedCalls := numGoroutines
-	if adapter.callCount != expectedCalls {
-		t.Errorf("Expected %d adapter calls, got %d", expectedCalls, adapter.callCount)
+	if adapter.GetCallCount() != expectedCalls {
+		t.Errorf("Expected %d adapter calls, got %d", expectedCalls, adapter.GetCallCount())
 	}
 
-	if provider.callCount != expectedCalls {
-		t.Errorf("Expected %d provider calls, got %d", expectedCalls, provider.callCount)
+	if provider.GetCallCount() != expectedCalls {
+		t.Errorf("Expected %d provider calls, got %d", expectedCalls, provider.GetCallCount())
 	}
 }
 
