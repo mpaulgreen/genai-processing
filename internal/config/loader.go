@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,6 +36,16 @@ func (l *Loader) LoadConfig() (*AppConfig, error) {
 	// Load prompts configuration
 	if err := l.loadPromptsConfig(config); err != nil {
 		return nil, fmt.Errorf("failed to load prompts config: %w", err)
+	}
+
+	// Load rules configuration
+	if err := l.loadRulesConfig(config); err != nil {
+		return nil, fmt.Errorf("failed to load rules config: %w", err)
+	}
+
+	// Load context configuration
+	if err := l.loadContextConfig(config); err != nil {
+		return nil, fmt.Errorf("failed to load context config: %w", err)
 	}
 
 	// Apply environment variable overrides
@@ -119,6 +130,60 @@ func (l *Loader) loadPromptsConfig(config *AppConfig) error {
 		config.Prompts.Validation = promptsConfig.Validation
 	}
 
+	return nil
+}
+
+// loadRulesConfig loads rules configuration from configs/rules.yaml
+func (l *Loader) loadRulesConfig(config *AppConfig) error {
+	rulesPath := filepath.Join(l.configDir, "rules.yaml")
+
+	// Check if file exists
+	if _, err := os.Stat(rulesPath); os.IsNotExist(err) {
+		// File doesn't exist, use default configuration
+		config.Rules = *GetDefaultRulesConfig()
+		return nil
+	}
+
+	// Read and parse the file
+	data, err := os.ReadFile(rulesPath)
+	if err != nil {
+		return fmt.Errorf("failed to read rules config file: %w", err)
+	}
+
+	var rulesConfig RulesConfig
+	if err := yaml.Unmarshal(data, &rulesConfig); err != nil {
+		return fmt.Errorf("failed to parse rules config YAML: %w", err)
+	}
+
+	// Use loaded configuration
+	config.Rules = rulesConfig
+	return nil
+}
+
+// loadContextConfig loads context configuration from configs/context.yaml
+func (l *Loader) loadContextConfig(config *AppConfig) error {
+	contextPath := filepath.Join(l.configDir, "context.yaml")
+
+	// Check if file exists
+	if _, err := os.Stat(contextPath); os.IsNotExist(err) {
+		// File doesn't exist, use default configuration
+		config.Context = *GetDefaultContextConfig()
+		return nil
+	}
+
+	// Read and parse the file
+	data, err := os.ReadFile(contextPath)
+	if err != nil {
+		return fmt.Errorf("failed to read context config file: %w", err)
+	}
+
+	var contextConfig ContextConfig
+	if err := yaml.Unmarshal(data, &contextConfig); err != nil {
+		return fmt.Errorf("failed to parse context config YAML: %w", err)
+	}
+
+	// Use loaded configuration
+	config.Context = contextConfig
 	return nil
 }
 
@@ -211,6 +276,49 @@ func (l *Loader) applyEnvironmentOverrides(config *AppConfig) {
 		}
 
 		config.Models.Providers[providerName] = provider
+	}
+
+	// Context configuration overrides
+	if cleanupIntervalStr := os.Getenv("CONTEXT_CLEANUP_INTERVAL"); cleanupIntervalStr != "" {
+		if duration, err := time.ParseDuration(cleanupIntervalStr); err == nil {
+			config.Context.CleanupInterval = duration
+		}
+	}
+	if sessionTimeoutStr := os.Getenv("CONTEXT_SESSION_TIMEOUT"); sessionTimeoutStr != "" {
+		if duration, err := time.ParseDuration(sessionTimeoutStr); err == nil {
+			config.Context.SessionTimeout = duration
+		}
+	}
+	if maxSessionsStr := os.Getenv("CONTEXT_MAX_SESSIONS"); maxSessionsStr != "" {
+		if maxSessions, err := strconv.Atoi(maxSessionsStr); err == nil {
+			config.Context.MaxSessions = maxSessions
+		}
+	}
+	if maxMemoryMBStr := os.Getenv("CONTEXT_MAX_MEMORY_MB"); maxMemoryMBStr != "" {
+		if maxMemoryMB, err := strconv.Atoi(maxMemoryMBStr); err == nil {
+			config.Context.MaxMemoryMB = maxMemoryMB
+		}
+	}
+	if enablePersistenceStr := os.Getenv("CONTEXT_ENABLE_PERSISTENCE"); enablePersistenceStr != "" {
+		if enablePersistence, err := strconv.ParseBool(enablePersistenceStr); err == nil {
+			config.Context.EnablePersistence = enablePersistence
+		}
+	}
+	if persistencePath := os.Getenv("CONTEXT_PERSISTENCE_PATH"); persistencePath != "" {
+		config.Context.PersistencePath = persistencePath
+	}
+	if persistenceFormat := os.Getenv("CONTEXT_PERSISTENCE_FORMAT"); persistenceFormat != "" {
+		config.Context.PersistenceFormat = persistenceFormat
+	}
+	if persistenceIntervalStr := os.Getenv("CONTEXT_PERSISTENCE_INTERVAL"); persistenceIntervalStr != "" {
+		if duration, err := time.ParseDuration(persistenceIntervalStr); err == nil {
+			config.Context.PersistenceInterval = duration
+		}
+	}
+	if enableAsyncPersistenceStr := os.Getenv("CONTEXT_ENABLE_ASYNC_PERSISTENCE"); enableAsyncPersistenceStr != "" {
+		if enableAsyncPersistence, err := strconv.ParseBool(enableAsyncPersistenceStr); err == nil {
+			config.Context.EnableAsyncPersistence = enableAsyncPersistence
+		}
 	}
 }
 
@@ -327,6 +435,78 @@ func (l *Loader) SavePromptsConfig(config *AppConfig) error {
 	return nil
 }
 
+// SaveRulesConfig saves the rules configuration to configs/rules.yaml
+func (l *Loader) SaveRulesConfig(config *AppConfig) error {
+	rulesPath := filepath.Join(l.configDir, "rules.yaml")
+
+	// Create a rules-only config for saving
+	rulesConfig := RulesConfig{
+		SafetyRules:    config.Rules.SafetyRules,
+		Sanitization:   config.Rules.Sanitization,
+		QueryLimits:    config.Rules.QueryLimits,
+		BusinessHours:  config.Rules.BusinessHours,
+		AnalysisLimits: config.Rules.AnalysisLimits,
+		ResponseStatus: config.Rules.ResponseStatus,
+		AuthDecisions:  config.Rules.AuthDecisions,
+	}
+
+	// Marshal only the rules config
+	data, err := yaml.Marshal(rulesConfig)
+	if err != nil {
+		return fmt.Errorf("failed to marshal rules config to YAML: %w", err)
+	}
+
+	// Ensure the directory exists
+	dir := filepath.Dir(rulesPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	// Write the file
+	if err := os.WriteFile(rulesPath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write rules config file: %w", err)
+	}
+
+	return nil
+}
+
+// SaveContextConfig saves the context configuration to configs/context.yaml
+func (l *Loader) SaveContextConfig(config *AppConfig) error {
+	contextPath := filepath.Join(l.configDir, "context.yaml")
+
+	// Create a context-only config for saving
+	contextConfig := ContextConfig{
+		CleanupInterval:        config.Context.CleanupInterval,
+		SessionTimeout:         config.Context.SessionTimeout,
+		MaxSessions:           config.Context.MaxSessions,
+		MaxMemoryMB:           config.Context.MaxMemoryMB,
+		EnablePersistence:     config.Context.EnablePersistence,
+		PersistencePath:       config.Context.PersistencePath,
+		PersistenceFormat:     config.Context.PersistenceFormat,
+		PersistenceInterval:   config.Context.PersistenceInterval,
+		EnableAsyncPersistence: config.Context.EnableAsyncPersistence,
+	}
+
+	// Marshal only the context config
+	data, err := yaml.Marshal(contextConfig)
+	if err != nil {
+		return fmt.Errorf("failed to marshal context config to YAML: %w", err)
+	}
+
+	// Ensure the directory exists
+	dir := filepath.Dir(contextPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	// Write the file
+	if err := os.WriteFile(contextPath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write context config file: %w", err)
+	}
+
+	return nil
+}
+
 // ValidateConfigFile validates a configuration file without loading it
 func (l *Loader) ValidateConfigFile(filePath string) (*ValidationResult, error) {
 	// Check if file exists
@@ -364,6 +544,8 @@ func (l *Loader) GetConfigFilePaths() map[string]string {
 	return map[string]string{
 		"models":  filepath.Join(l.configDir, "models.yaml"),
 		"prompts": filepath.Join(l.configDir, "prompts.yaml"),
+		"rules":   filepath.Join(l.configDir, "rules.yaml"),
+		"context": filepath.Join(l.configDir, "context.yaml"),
 	}
 }
 

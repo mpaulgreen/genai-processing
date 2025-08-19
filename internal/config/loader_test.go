@@ -302,6 +302,94 @@ prompts:
     max_input_length: 500
     max_output_length: 1000
     required_fields: ["log_source"]
+
+rules:
+  safety_rules:
+    allowed_log_sources:
+      - "kube-apiserver"
+      - "openshift-apiserver"
+    allowed_verbs:
+      - "get"
+      - "list"
+      - "create"
+    allowed_resources:
+      - "pods"
+      - "services"
+    forbidden_patterns:
+      - "rm -rf"
+    timeframe_limits:
+      max_days_back: 90
+      default_limit: 20
+      max_limit: 1000
+      min_limit: 1
+      allowed_timeframes:
+        - "today"
+        - "yesterday"
+    required_fields:
+      - "log_source"
+  sanitization:
+    max_query_length: 10000
+    max_pattern_length: 500
+    max_user_pattern_length: 200
+    max_namespace_pattern_length: 200
+    max_resource_pattern_length: 200
+    valid_regex_pattern: "^[a-zA-Z0-9\\-_\\*\\.\\?\\+]+$"
+    valid_ip_pattern: "^[0-9\\.]+$"
+    valid_namespace_pattern: "^[a-z0-9\\-]+$"
+    valid_resource_pattern: "^[a-z0-9\\-]+$"
+    forbidden_chars:
+      - "<"
+      - ">"
+  query_limits:
+    max_exclude_users: 50
+    max_exclude_resources: 50
+    max_group_by_fields: 5
+    max_sort_fields: 3
+    max_verb_array_size: 10
+    max_resource_array_size: 20
+    max_namespace_array_size: 50
+    max_user_array_size: 100
+    max_response_status_array_size: 10
+    max_source_ip_array_size: 20
+  business_hours:
+    default_start_hour: 9
+    default_end_hour: 17
+    default_timezone: "UTC"
+    max_hour_value: 23
+    min_hour_value: 0
+  analysis_limits:
+    max_threshold_value: 10000
+    min_threshold_value: 1
+    allowed_analysis_types:
+      - "anomaly_detection"
+    allowed_time_windows:
+      - "short"
+    allowed_sort_fields:
+      - "timestamp"
+    allowed_sort_orders:
+      - "asc"
+  response_status:
+    allowed_status_codes:
+      - "200"
+      - "400"
+      - "401"
+    min_status_code: 100
+    max_status_code: 599
+  auth_decisions:
+    allowed_decisions:
+      - "allow"
+      - "forbid"
+
+context:
+  cleanup_interval: "10m"
+  session_timeout: "12h"
+  max_sessions: 5000
+  max_memory_mb: 50
+  enable_persistence: true
+  persistence_path: "./test_sessions"
+  persistence_format: "json"
+  persistence_interval: "60s"
+  enable_async_persistence: false
 `
 
 	configPath := filepath.Join(tempDir, "test_config.yaml")
@@ -494,6 +582,87 @@ prompts:
     max_input_length: 1000
     max_output_length: 2000
     required_fields: ["log_source"]
+
+rules:
+  safety_rules:
+    allowed_log_sources:
+      - "kube-apiserver"
+    allowed_verbs:
+      - "get"
+      - "list"
+    allowed_resources:
+      - "pods"
+    forbidden_patterns:
+      - "rm -rf"
+    timeframe_limits:
+      max_days_back: 90
+      default_limit: 20
+      max_limit: 1000
+      min_limit: 1
+      allowed_timeframes:
+        - "today"
+    required_fields:
+      - "log_source"
+  sanitization:
+    max_query_length: 10000
+    max_pattern_length: 500
+    max_user_pattern_length: 200
+    max_namespace_pattern_length: 200
+    max_resource_pattern_length: 200
+    valid_regex_pattern: "^[a-zA-Z0-9\\-_\\*\\.\\?\\+]+$"
+    valid_ip_pattern: "^[0-9\\.]+$"
+    valid_namespace_pattern: "^[a-z0-9\\-]+$"
+    valid_resource_pattern: "^[a-z0-9\\-]+$"
+    forbidden_chars:
+      - "<"
+  query_limits:
+    max_exclude_users: 50
+    max_exclude_resources: 50
+    max_group_by_fields: 5
+    max_sort_fields: 3
+    max_verb_array_size: 10
+    max_resource_array_size: 20
+    max_namespace_array_size: 50
+    max_user_array_size: 100
+    max_response_status_array_size: 10
+    max_source_ip_array_size: 20
+  business_hours:
+    default_start_hour: 9
+    default_end_hour: 17
+    default_timezone: "UTC"
+    max_hour_value: 23
+    min_hour_value: 0
+  analysis_limits:
+    max_threshold_value: 10000
+    min_threshold_value: 1
+    allowed_analysis_types:
+      - "anomaly_detection"
+    allowed_time_windows:
+      - "short"
+    allowed_sort_fields:
+      - "timestamp"
+    allowed_sort_orders:
+      - "asc"
+  response_status:
+    allowed_status_codes:
+      - "200"
+      - "400"
+    min_status_code: 100
+    max_status_code: 599
+  auth_decisions:
+    allowed_decisions:
+      - "allow"
+
+context:
+  cleanup_interval: "5m"
+  session_timeout: "24h"
+  max_sessions: 10000
+  max_memory_mb: 100
+  enable_persistence: true
+  persistence_path: "./sessions"
+  persistence_format: "json"
+  persistence_interval: "30s"
+  enable_async_persistence: true
 `
 
 	configPath := filepath.Join(tempDir, "valid_config.yaml")
@@ -626,5 +795,488 @@ func TestSavePromptsConfig(t *testing.T) {
 
 	if loadedConfig.Prompts.SystemPrompts["base"] != "Custom base prompt" {
 		t.Errorf("Expected saved custom base prompt, got %s", loadedConfig.Prompts.SystemPrompts["base"])
+	}
+}
+
+func TestLoadConfig_WithRulesFile(t *testing.T) {
+	// Create a temporary directory for testing
+	tempDir := t.TempDir()
+	loader := NewLoader(tempDir)
+
+	// Create a rules.yaml file
+	rulesYAML := `
+safety_rules:
+  allowed_log_sources:
+    - "kube-apiserver"
+    - "openshift-apiserver"
+  allowed_verbs:
+    - "get"
+    - "list"
+    - "create"
+  allowed_resources:
+    - "pods"
+    - "services"
+  forbidden_patterns:
+    - "rm -rf"
+    - "delete --all"
+  timeframe_limits:
+    max_days_back: 30
+    default_limit: 10
+    max_limit: 100
+    min_limit: 1
+    allowed_timeframes:
+      - "today"
+      - "yesterday"
+  required_fields:
+    - "log_source"
+
+sanitization:
+  max_query_length: 5000
+  max_pattern_length: 250
+  max_user_pattern_length: 100
+  max_namespace_pattern_length: 100
+  max_resource_pattern_length: 100
+  valid_regex_pattern: "^[a-zA-Z0-9\\-_\\*\\.\\?\\+]+$"
+  valid_ip_pattern: "^[0-9\\.]+$"
+  valid_namespace_pattern: "^[a-z0-9\\-]+$"
+  valid_resource_pattern: "^[a-z0-9\\-]+$"
+  forbidden_chars:
+    - "<"
+    - ">"
+
+query_limits:
+  max_exclude_users: 25
+  max_exclude_resources: 25
+  max_group_by_fields: 3
+  max_sort_fields: 2
+  max_verb_array_size: 5
+  max_resource_array_size: 10
+  max_namespace_array_size: 25
+  max_user_array_size: 50
+  max_response_status_array_size: 5
+  max_source_ip_array_size: 10
+
+business_hours:
+  default_start_hour: 8
+  default_end_hour: 18
+  default_timezone: "EST"
+  max_hour_value: 23
+  min_hour_value: 0
+
+analysis_limits:
+  max_threshold_value: 5000
+  min_threshold_value: 5
+  allowed_analysis_types:
+    - "anomaly_detection"
+    - "correlation"
+  allowed_time_windows:
+    - "short"
+    - "medium"
+  allowed_sort_fields:
+    - "timestamp"
+    - "user"
+  allowed_sort_orders:
+    - "asc"
+    - "desc"
+
+response_status:
+  allowed_status_codes:
+    - "200"
+    - "400"
+    - "401"
+    - "403"
+    - "404"
+  min_status_code: 100
+  max_status_code: 599
+
+auth_decisions:
+  allowed_decisions:
+    - "allow"
+    - "forbid"
+`
+
+	rulesPath := filepath.Join(tempDir, "rules.yaml")
+	if err := os.WriteFile(rulesPath, []byte(rulesYAML), 0644); err != nil {
+		t.Fatalf("Failed to write test rules file: %v", err)
+	}
+
+	// Load configuration
+	config, err := loader.LoadConfig()
+	if err != nil {
+		t.Fatalf("Expected no error loading config with rules file, got: %v", err)
+	}
+
+	// Verify loaded values
+	if len(config.Rules.SafetyRules.AllowedLogSources) != 2 {
+		t.Errorf("Expected 2 allowed log sources, got %d", len(config.Rules.SafetyRules.AllowedLogSources))
+	}
+
+	if config.Rules.SafetyRules.TimeframeLimits.MaxDaysBack != 30 {
+		t.Errorf("Expected max days back 30, got %d", config.Rules.SafetyRules.TimeframeLimits.MaxDaysBack)
+	}
+
+	if config.Rules.Sanitization.MaxQueryLength != 5000 {
+		t.Errorf("Expected max query length 5000, got %d", config.Rules.Sanitization.MaxQueryLength)
+	}
+
+	if config.Rules.BusinessHours.DefaultStartHour != 8 {
+		t.Errorf("Expected default start hour 8, got %d", config.Rules.BusinessHours.DefaultStartHour)
+	}
+
+	if config.Rules.BusinessHours.DefaultTimezone != "EST" {
+		t.Errorf("Expected timezone EST, got %s", config.Rules.BusinessHours.DefaultTimezone)
+	}
+}
+
+func TestLoadConfig_NoRulesFile(t *testing.T) {
+	// Create a temporary directory for testing
+	tempDir := t.TempDir()
+	loader := NewLoader(tempDir)
+
+	// Load configuration (should use defaults since no rules file exists)
+	config, err := loader.LoadConfig()
+	if err != nil {
+		t.Fatalf("Expected no error loading config without rules file, got: %v", err)
+	}
+
+	// Verify default values are used
+	defaultRules := GetDefaultRulesConfig()
+	if len(config.Rules.SafetyRules.AllowedLogSources) != len(defaultRules.SafetyRules.AllowedLogSources) {
+		t.Errorf("Expected default allowed log sources count %d, got %d", 
+			len(defaultRules.SafetyRules.AllowedLogSources), 
+			len(config.Rules.SafetyRules.AllowedLogSources))
+	}
+
+	if config.Rules.SafetyRules.TimeframeLimits.MaxDaysBack != defaultRules.SafetyRules.TimeframeLimits.MaxDaysBack {
+		t.Errorf("Expected default max days back %d, got %d", 
+			defaultRules.SafetyRules.TimeframeLimits.MaxDaysBack, 
+			config.Rules.SafetyRules.TimeframeLimits.MaxDaysBack)
+	}
+}
+
+func TestSaveRulesConfig(t *testing.T) {
+	tempDir := t.TempDir()
+	loader := NewLoader(tempDir)
+
+	config := GetDefaultConfig()
+	config.Rules.SafetyRules.TimeframeLimits.MaxDaysBack = 60
+	config.Rules.BusinessHours.DefaultTimezone = "PST"
+
+	err := loader.SaveRulesConfig(config)
+	if err != nil {
+		t.Fatalf("Expected no error saving rules config, got: %v", err)
+	}
+
+	// Verify file was created
+	rulesPath := filepath.Join(tempDir, "rules.yaml")
+	if _, err := os.Stat(rulesPath); os.IsNotExist(err) {
+		t.Error("Expected rules config file to be created")
+	}
+
+	// Verify content by loading it back
+	loadedConfig, err := loader.LoadConfig()
+	if err != nil {
+		t.Fatalf("Expected no error loading saved rules config, got: %v", err)
+	}
+
+	if loadedConfig.Rules.SafetyRules.TimeframeLimits.MaxDaysBack != 60 {
+		t.Errorf("Expected saved max days back 60, got %d", loadedConfig.Rules.SafetyRules.TimeframeLimits.MaxDaysBack)
+	}
+
+	if loadedConfig.Rules.BusinessHours.DefaultTimezone != "PST" {
+		t.Errorf("Expected saved timezone PST, got %s", loadedConfig.Rules.BusinessHours.DefaultTimezone)
+	}
+}
+
+func TestGetConfigFilePaths_IncludesRules(t *testing.T) {
+	tempDir := t.TempDir()
+	loader := NewLoader(tempDir)
+
+	paths := loader.GetConfigFilePaths()
+	
+	expectedPaths := map[string]string{
+		"models":  filepath.Join(tempDir, "models.yaml"),
+		"prompts": filepath.Join(tempDir, "prompts.yaml"),
+		"rules":   filepath.Join(tempDir, "rules.yaml"),
+	}
+
+	for name, expectedPath := range expectedPaths {
+		if actualPath, exists := paths[name]; !exists {
+			t.Errorf("Expected path for '%s' to exist", name)
+		} else if actualPath != expectedPath {
+			t.Errorf("Expected path for '%s' to be '%s', got '%s'", name, expectedPath, actualPath)
+		}
+	}
+}
+
+func TestCheckConfigFiles_IncludesRules(t *testing.T) {
+	tempDir := t.TempDir()
+	loader := NewLoader(tempDir)
+
+	// Initially, no files should exist
+	exists := loader.CheckConfigFiles()
+	if exists["rules"] {
+		t.Error("Expected rules file to not exist initially")
+	}
+
+	// Create rules file
+	rulesPath := filepath.Join(tempDir, "rules.yaml")
+	if err := os.WriteFile(rulesPath, []byte("test"), 0644); err != nil {
+		t.Fatalf("Failed to create test rules file: %v", err)
+	}
+
+	// Check again
+	exists = loader.CheckConfigFiles()
+	if !exists["rules"] {
+		t.Error("Expected rules file to exist after creation")
+	}
+}
+
+func TestLoadConfig_WithContextFile(t *testing.T) {
+	// Create a temporary directory for testing
+	tempDir := t.TempDir()
+	loader := NewLoader(tempDir)
+
+	// Create a context.yaml file
+	contextYAML := `
+cleanup_interval: "10m"
+session_timeout: "12h"
+max_sessions: 5000
+max_memory_mb: 50
+enable_persistence: false
+persistence_path: "./custom_sessions"
+persistence_format: "gob"
+persistence_interval: "60s"
+enable_async_persistence: false
+`
+
+	contextPath := filepath.Join(tempDir, "context.yaml")
+	if err := os.WriteFile(contextPath, []byte(contextYAML), 0644); err != nil {
+		t.Fatalf("Failed to write test context file: %v", err)
+	}
+
+	// Load configuration
+	config, err := loader.LoadConfig()
+	if err != nil {
+		t.Fatalf("Expected no error loading config with context file, got: %v", err)
+	}
+
+	// Verify loaded values
+	if config.Context.CleanupInterval != 10*time.Minute {
+		t.Errorf("Expected cleanup interval 10m, got %v", config.Context.CleanupInterval)
+	}
+
+	if config.Context.SessionTimeout != 12*time.Hour {
+		t.Errorf("Expected session timeout 12h, got %v", config.Context.SessionTimeout)
+	}
+
+	if config.Context.MaxSessions != 5000 {
+		t.Errorf("Expected max sessions 5000, got %d", config.Context.MaxSessions)
+	}
+
+	if config.Context.MaxMemoryMB != 50 {
+		t.Errorf("Expected max memory 50MB, got %d", config.Context.MaxMemoryMB)
+	}
+
+	if config.Context.EnablePersistence != false {
+		t.Errorf("Expected enable persistence false, got %v", config.Context.EnablePersistence)
+	}
+
+	if config.Context.PersistencePath != "./custom_sessions" {
+		t.Errorf("Expected persistence path './custom_sessions', got %s", config.Context.PersistencePath)
+	}
+
+	if config.Context.PersistenceFormat != "gob" {
+		t.Errorf("Expected persistence format 'gob', got %s", config.Context.PersistenceFormat)
+	}
+
+	if config.Context.PersistenceInterval != 60*time.Second {
+		t.Errorf("Expected persistence interval 60s, got %v", config.Context.PersistenceInterval)
+	}
+
+	if config.Context.EnableAsyncPersistence != false {
+		t.Errorf("Expected enable async persistence false, got %v", config.Context.EnableAsyncPersistence)
+	}
+}
+
+func TestLoadConfig_NoContextFile(t *testing.T) {
+	// Create a temporary directory for testing
+	tempDir := t.TempDir()
+	loader := NewLoader(tempDir)
+
+	// Load configuration (should use defaults since no context file exists)
+	config, err := loader.LoadConfig()
+	if err != nil {
+		t.Fatalf("Expected no error loading config without context file, got: %v", err)
+	}
+
+	// Verify default values are used
+	defaultContext := GetDefaultContextConfig()
+	if config.Context.CleanupInterval != defaultContext.CleanupInterval {
+		t.Errorf("Expected default cleanup interval %v, got %v", 
+			defaultContext.CleanupInterval, config.Context.CleanupInterval)
+	}
+
+	if config.Context.SessionTimeout != defaultContext.SessionTimeout {
+		t.Errorf("Expected default session timeout %v, got %v", 
+			defaultContext.SessionTimeout, config.Context.SessionTimeout)
+	}
+
+	if config.Context.MaxSessions != defaultContext.MaxSessions {
+		t.Errorf("Expected default max sessions %d, got %d", 
+			defaultContext.MaxSessions, config.Context.MaxSessions)
+	}
+
+	if config.Context.PersistenceFormat != defaultContext.PersistenceFormat {
+		t.Errorf("Expected default persistence format %s, got %s", 
+			defaultContext.PersistenceFormat, config.Context.PersistenceFormat)
+	}
+}
+
+func TestSaveContextConfig(t *testing.T) {
+	tempDir := t.TempDir()
+	loader := NewLoader(tempDir)
+
+	config := GetDefaultConfig()
+	config.Context.CleanupInterval = 15 * time.Minute
+	config.Context.MaxSessions = 8000
+	config.Context.PersistenceFormat = "gob"
+
+	err := loader.SaveContextConfig(config)
+	if err != nil {
+		t.Fatalf("Expected no error saving context config, got: %v", err)
+	}
+
+	// Verify file was created
+	contextPath := filepath.Join(tempDir, "context.yaml")
+	if _, err := os.Stat(contextPath); os.IsNotExist(err) {
+		t.Error("Expected context config file to be created")
+	}
+
+	// Verify content by loading it back
+	loadedConfig, err := loader.LoadConfig()
+	if err != nil {
+		t.Fatalf("Expected no error loading saved context config, got: %v", err)
+	}
+
+	if loadedConfig.Context.CleanupInterval != 15*time.Minute {
+		t.Errorf("Expected saved cleanup interval 15m, got %v", loadedConfig.Context.CleanupInterval)
+	}
+
+	if loadedConfig.Context.MaxSessions != 8000 {
+		t.Errorf("Expected saved max sessions 8000, got %d", loadedConfig.Context.MaxSessions)
+	}
+
+	if loadedConfig.Context.PersistenceFormat != "gob" {
+		t.Errorf("Expected saved persistence format 'gob', got %s", loadedConfig.Context.PersistenceFormat)
+	}
+}
+
+func TestLoadConfig_ContextEnvironmentOverrides(t *testing.T) {
+	tempDir := t.TempDir()
+	loader := NewLoader(tempDir)
+
+	// Set environment variables
+	os.Setenv("CONTEXT_CLEANUP_INTERVAL", "20m")
+	os.Setenv("CONTEXT_SESSION_TIMEOUT", "48h")
+	os.Setenv("CONTEXT_MAX_SESSIONS", "15000")
+	os.Setenv("CONTEXT_MAX_MEMORY_MB", "200")
+	os.Setenv("CONTEXT_ENABLE_PERSISTENCE", "false")
+	os.Setenv("CONTEXT_PERSISTENCE_PATH", "/tmp/custom_sessions")
+	os.Setenv("CONTEXT_PERSISTENCE_FORMAT", "gob")
+	os.Setenv("CONTEXT_PERSISTENCE_INTERVAL", "120s")
+	os.Setenv("CONTEXT_ENABLE_ASYNC_PERSISTENCE", "false")
+
+	// Clean up environment variables after test
+	defer func() {
+		os.Unsetenv("CONTEXT_CLEANUP_INTERVAL")
+		os.Unsetenv("CONTEXT_SESSION_TIMEOUT")
+		os.Unsetenv("CONTEXT_MAX_SESSIONS")
+		os.Unsetenv("CONTEXT_MAX_MEMORY_MB")
+		os.Unsetenv("CONTEXT_ENABLE_PERSISTENCE")
+		os.Unsetenv("CONTEXT_PERSISTENCE_PATH")
+		os.Unsetenv("CONTEXT_PERSISTENCE_FORMAT")
+		os.Unsetenv("CONTEXT_PERSISTENCE_INTERVAL")
+		os.Unsetenv("CONTEXT_ENABLE_ASYNC_PERSISTENCE")
+	}()
+
+	// Load configuration
+	config, err := loader.LoadConfig()
+	if err != nil {
+		t.Fatalf("Expected no error loading config with context environment overrides, got: %v", err)
+	}
+
+	// Verify environment variable overrides
+	if config.Context.CleanupInterval != 20*time.Minute {
+		t.Errorf("Expected cleanup interval 20m from environment, got %v", config.Context.CleanupInterval)
+	}
+	if config.Context.SessionTimeout != 48*time.Hour {
+		t.Errorf("Expected session timeout 48h from environment, got %v", config.Context.SessionTimeout)
+	}
+	if config.Context.MaxSessions != 15000 {
+		t.Errorf("Expected max sessions 15000 from environment, got %d", config.Context.MaxSessions)
+	}
+	if config.Context.MaxMemoryMB != 200 {
+		t.Errorf("Expected max memory 200MB from environment, got %d", config.Context.MaxMemoryMB)
+	}
+	if config.Context.EnablePersistence != false {
+		t.Errorf("Expected enable persistence false from environment, got %v", config.Context.EnablePersistence)
+	}
+	if config.Context.PersistencePath != "/tmp/custom_sessions" {
+		t.Errorf("Expected persistence path from environment, got %s", config.Context.PersistencePath)
+	}
+	if config.Context.PersistenceFormat != "gob" {
+		t.Errorf("Expected persistence format 'gob' from environment, got %s", config.Context.PersistenceFormat)
+	}
+	if config.Context.PersistenceInterval != 120*time.Second {
+		t.Errorf("Expected persistence interval 120s from environment, got %v", config.Context.PersistenceInterval)
+	}
+	if config.Context.EnableAsyncPersistence != false {
+		t.Errorf("Expected enable async persistence false from environment, got %v", config.Context.EnableAsyncPersistence)
+	}
+}
+
+func TestGetConfigFilePaths_IncludesContext(t *testing.T) {
+	tempDir := t.TempDir()
+	loader := NewLoader(tempDir)
+
+	paths := loader.GetConfigFilePaths()
+	
+	expectedPaths := map[string]string{
+		"models":  filepath.Join(tempDir, "models.yaml"),
+		"prompts": filepath.Join(tempDir, "prompts.yaml"),
+		"rules":   filepath.Join(tempDir, "rules.yaml"),
+		"context": filepath.Join(tempDir, "context.yaml"),
+	}
+
+	for name, expectedPath := range expectedPaths {
+		if actualPath, exists := paths[name]; !exists {
+			t.Errorf("Expected path for '%s' to exist", name)
+		} else if actualPath != expectedPath {
+			t.Errorf("Expected path for '%s' to be '%s', got '%s'", name, expectedPath, actualPath)
+		}
+	}
+}
+
+func TestCheckConfigFiles_IncludesContext(t *testing.T) {
+	tempDir := t.TempDir()
+	loader := NewLoader(tempDir)
+
+	// Initially, no files should exist
+	exists := loader.CheckConfigFiles()
+	if exists["context"] {
+		t.Error("Expected context file to not exist initially")
+	}
+
+	// Create context file
+	contextPath := filepath.Join(tempDir, "context.yaml")
+	if err := os.WriteFile(contextPath, []byte("test"), 0644); err != nil {
+		t.Fatalf("Failed to create test context file: %v", err)
+	}
+
+	// Check again
+	exists = loader.CheckConfigFiles()
+	if !exists["context"] {
+		t.Error("Expected context file to exist after creation")
 	}
 }
