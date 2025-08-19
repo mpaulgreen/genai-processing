@@ -2,6 +2,7 @@ package rules
 
 import (
 	"fmt"
+	"strings"
 
 	"genai-processing/pkg/interfaces"
 	"genai-processing/pkg/types"
@@ -33,6 +34,14 @@ func (r *RequiredFieldsRule) Validate(query *types.StructuredQuery) *interfaces.
 		Warnings:        []string{},
 		Errors:          []string{},
 		QuerySnapshot:   query,
+	}
+
+	// Handle nil query
+	if query == nil {
+		result.IsValid = false
+		result.Message = "Required fields validation failed"
+		result.Errors = append(result.Errors, "Query cannot be nil")
+		return result
 	}
 
 	// Check each required field
@@ -80,7 +89,7 @@ func (r *RequiredFieldsRule) GetSeverity() string {
 func (r *RequiredFieldsRule) isFieldPresent(query *types.StructuredQuery, field string) bool {
 	switch field {
 	case "log_source":
-		return query.LogSource != ""
+		return strings.TrimSpace(query.LogSource) != ""
 	case "verb":
 		return !query.Verb.IsEmpty()
 	case "resource":

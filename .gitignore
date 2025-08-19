@@ -31,3 +31,4 @@ go.work
 ./vscode
 
 CLAUDE.md
+.DS_Store

@@ -2,6 +2,7 @@ package validator
 
 import (
 	"testing"
+	"time"
 
 	"genai-processing/pkg/interfaces"
 	"genai-processing/pkg/types"
@@ -560,5 +561,245 @@ func TestSafetyValidator_GetValidationStats(t *testing.T) {
 	}
 	if totalRules == 0 {
 		t.Error("At least one validation rule should be active")
+	}
+}
+
+// Benchmark validation performance
+func BenchmarkSafetyValidator_ValidateQuery(b *testing.B) {
+	validator := NewSafetyValidator()
+	
+	query := &types.StructuredQuery{
+		LogSource: "kube-apiserver",
+		Verb:      *types.NewStringOrArray("get"),
+		Resource:  *types.NewStringOrArray("pods"),
+		Timeframe: "today",
+		UserPattern: "test-user",
+		Namespace:   *types.NewStringOrArray("default"),
+	}
+	
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		result, err := validator.ValidateQuery(query)
+		if err != nil {
+			b.Fatalf("Validation error: %v", err)
+		}
+		if result == nil {
+			b.Fatal("Expected non-nil result")
+		}
+	}
+}
+
+func BenchmarkSafetyValidator_GetApplicableRules(b *testing.B) {
+	validator := NewSafetyValidator()
+	
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		rules := validator.GetApplicableRules()
+		if len(rules) == 0 {
+			b.Error("Expected some applicable rules")
+		}
+	}
+}
+
+func TestSafetyValidator_ConcurrentValidation(t *testing.T) {
+	validator := NewSafetyValidator()
+	
+	query := &types.StructuredQuery{
+		LogSource: "kube-apiserver",
+		UserPattern: "safe-pattern",
+	}
+	
+	// Test concurrent validation
+	numGoroutines := 10
+	results := make(chan *interfaces.ValidationResult, numGoroutines)
+	errors := make(chan error, numGoroutines)
+	
+	for i := 0; i < numGoroutines; i++ {
+		go func() {
+			result, err := validator.ValidateQuery(query)
+			if err != nil {
+				errors <- err
+				return
+			}
+			results <- result
+		}()
+	}
+	
+	// Collect results
+	for i := 0; i < numGoroutines; i++ {
+		select {
+		case result := <-results:
+			if result == nil {
+				t.Error("Expected non-nil result from concurrent validation")
+			}
+		case err := <-errors:
+			t.Errorf("Unexpected error from concurrent validation: %v", err)
+		case <-time.After(5 * time.Second):
+			t.Fatal("Timeout waiting for concurrent validation results")
+		}
+	}
+}
+
+// TestSafetyValidator_InitializeRules tests the initializeRules method
+func TestSafetyValidator_InitializeRules(t *testing.T) {
+	config := &ValidationConfig{}
+	
+	// Test with minimal config
+	validator := NewSafetyValidatorWithConfig(config)
+	
+	// Should handle empty config gracefully
+	if validator.whitelist != nil {
+		t.Error("Expected whitelist to be nil with empty config")
+	}
+	
+	if validator.sanitization != nil {
+		t.Error("Expected sanitization to be nil with empty config")
+	}
+	
+	// Test with full config
+	config.SafetyRules.AllowedLogSources = []string{"kube-apiserver"}
+	config.SafetyRules.AllowedVerbs = []string{"get"}
+	config.SafetyRules.AllowedResources = []string{"pods"}
+	config.SafetyRules.ForbiddenPatterns = []string{"DROP TABLE"}
+	config.SafetyRules.RequiredFields = []string{"log_source"}
+	config.SafetyRules.Sanitization = map[string]interface{}{
+		"max_pattern_length": 500,
+	}
+	config.SafetyRules.TimeframeLimits = map[string]interface{}{
+		"max_days_back": 90,
+	}
+	
+	validator = NewSafetyValidatorWithConfig(config)
+	
+	// Should initialize all rules
+	if validator.whitelist == nil {
+		t.Error("Expected whitelist to be initialized")
+	}
+	
+	if validator.sanitization == nil {
+		t.Error("Expected sanitization to be initialized")
+	}
+	
+	if validator.timeframe == nil {
+		t.Error("Expected timeframe to be initialized")
+	}
+	
+	if validator.patterns == nil {
+		t.Error("Expected patterns to be initialized")
+	}
+	
+	if validator.requiredFields == nil {
+		t.Error("Expected requiredFields to be initialized")
+	}
+}
+
+// TestSafetyValidator_ValidationResult_Structure tests the validation result structure
+func TestSafetyValidator_ValidationResult_Structure(t *testing.T) {
+	validator := NewSafetyValidator()
+	
+	query := &types.StructuredQuery{
+		LogSource: "kube-apiserver",
+		UserPattern: "safe-pattern",
+	}
+	
+	result, err := validator.ValidateQuery(query)
+	
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	
+	if result == nil {
+		t.Fatal("Expected non-nil result")
+	}
+	
+	// Check result structure
+	if result.RuleName == "" {
+		t.Error("Expected non-empty rule name")
+	}
+	
+	if result.Severity == "" {
+		t.Error("Expected non-empty severity")
+	}
+	
+	if result.Message == "" {
+		t.Error("Expected non-empty message")
+	}
+	
+	if result.Timestamp == "" {
+		t.Error("Expected non-empty timestamp")
+	}
+	
+	if result.Details == nil {
+		t.Error("Expected non-nil details")
+	}
+	
+	if result.QuerySnapshot == nil {
+		t.Error("Expected non-nil query snapshot")
+	}
+	
+	// Check details structure
+	if _, exists := result.Details["rule_results"]; !exists {
+		t.Error("Expected rule_results in details")
+	}
+	
+	if _, exists := result.Details["total_rules_applied"]; !exists {
+		t.Error("Expected total_rules_applied in details")
+	}
+	
+	if _, exists := result.Details["validation_timestamp"]; !exists {
+		t.Error("Expected validation_timestamp in details")
+	}
+	
+	// Validate timestamp format
+	if _, err := time.Parse(time.RFC3339, result.Timestamp); err != nil {
+		t.Errorf("Invalid timestamp format: %s", result.Timestamp)
+	}
+}
+
+// TestSafetyValidator_CustomConfig tests validator with custom configuration
+func TestSafetyValidator_CustomConfig(t *testing.T) {
+	config := &ValidationConfig{}
+	config.SafetyRules.AllowedLogSources = []string{"test-source"}
+	config.SafetyRules.AllowedVerbs = []string{"get", "list"}
+	config.SafetyRules.ForbiddenPatterns = []string{"DROP TABLE"}
+	config.SafetyRules.RequiredFields = []string{"log_source"}
+	
+	validator := NewSafetyValidatorWithConfig(config)
+	
+	if validator == nil {
+		t.Fatal("Expected non-nil validator")
+	}
+	
+	if validator.config != config {
+		t.Error("Expected custom config to be used")
+	}
+	
+	// Test validation with custom config
+	query := &types.StructuredQuery{
+		LogSource: "test-source",
+		Verb:      *types.NewStringOrArray("get"),
+	}
+	
+	result, err := validator.ValidateQuery(query)
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	
+	if !result.IsValid {
+		t.Errorf("Expected validation to pass with custom config. Errors: %v", result.Errors)
+	}
+	
+	// Test invalid query with custom config
+	invalidQuery := &types.StructuredQuery{
+		LogSource: "invalid-source",
+	}
+	
+	result, err = validator.ValidateQuery(invalidQuery)
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	
+	if result.IsValid {
+		t.Error("Expected validation to fail for invalid log source")
 	}
 }
