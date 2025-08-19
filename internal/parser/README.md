@@ -121,23 +121,79 @@ err := normalizer.Normalize(query)  // Modifies query in-place
 
 #### Schema Validator (`schema_validator.go`)
 
-Validates structured queries against business rules and constraints.
+The `SchemaValidator` is the core component that provides comprehensive validation for the enhanced StructuredQuery schema. It supports validation of basic queries through enterprise-grade security monitoring configurations.
 
 **Features:**
-- **Required Fields**: Ensures log_source is present and valid
-- **Range Validation**: Validates limit bounds (1-1000) 
-- **Enum Validation**: Checks auth_decision, sort_order, sort_by values
-- **Timeframe Validation**: Validates timeframe keywords and formats
-- **Time Range Logic**: Ensures end time is after start time
-- **Business Hours**: Validates business hour constraints
-- **Analysis Types**: Validates analysis type and parameters
+- **Multi-layered Validation**: Six-phase validation approach covering all aspects of query validation
+- **Enhanced Error Handling**: Structured error responses with field-specific details and suggestions
+- **Query Complexity Analysis**: Performance impact assessment with complexity scoring
+- **Cross-field Validation**: Dependency checking and mutual exclusion validation
+- **Advanced Object Validation**: Support for complex nested objects and configurations
 - **Performance**: < 100µs per validation operation
+
+**Validation Phases:**
+1. **Required Field Validation**: Ensures all mandatory fields are present and valid
+2. **Basic Field Validation**: Validates simple fields like limits, timeframes, and basic filters
+3. **Advanced Field Validation**: Validates regex patterns, IP addresses, and complex filters
+4. **Complex Object Validation**: Validates nested configuration objects
+5. **Cross-field Validation**: Checks field relationships and dependencies
+6. **Performance Validation**: Assesses query complexity and performance implications
 
 **Example:**
 ```go
 validator := normalizers.NewSchemaValidator()
 err := validator.ValidateSchema(query)  // Returns validation errors
+
+// Query complexity analysis
+complexity := validator.(*normalizers.SchemaValidator).GetQueryComplexity(query)
+fmt.Printf("Query complexity: %s (Score: %d)", complexity.Level, complexity.Score)
 ```
+
+**Validation Rules Summary:**
+
+*Core Field Validation:*
+- **log_source** (Required): Must be one of `kube-apiserver`, `openshift-apiserver`, `oauth-server`, `oauth-apiserver`, `node-auditd`
+- **limit**: Range 1-1000 (performance warning > 500)
+- **verb**: Valid HTTP verbs, maximum 10 elements, no duplicates
+
+*Advanced Field Validation:*
+- **Regex Patterns**: Valid syntax, catastrophic backtracking detection
+- **IP Addresses**: Valid IPv4/IPv6 or CIDR notation
+- **Time Validation**: Logical ordering, duration limits, timezone validation
+
+*Complex Object Validation:*
+- **MultiSourceConfig**: Valid sources, no duplicates, proper correlation
+- **AdvancedAnalysisConfig**: Required analysis type, kill chain dependencies
+- **Statistical Analysis**: Parameter ranges and dependencies
+
+*Cross-field Validation:*
+- **Mutual Exclusions**: `timeframe` ⊕ `time_range`
+- **Field Dependencies**: APT analysis requires kill chain phase
+- **Log Source Compatibility**: Field availability per log source
+
+**Query Complexity Scoring:**
+
+The validator assigns complexity points:
+- Basic fields: 1 point each
+- Time range: 2 points  
+- Pattern matching: 3 points each
+- Multi-source correlation: 5 points + 1 per secondary source
+- Advanced analysis: 10 points
+- Machine learning: 15 points
+
+Complexity levels:
+- **Low** (< 20 points): Fast execution
+- **Medium** (20-50 points): Moderate execution  
+- **High** (> 50 points): Potential performance impact
+
+**Error Categories:**
+- `FIELD_REQUIRED`: Missing required field
+- `FIELD_FORMAT`: Invalid field format  
+- `FIELD_RANGE`: Value out of allowed range
+- `FIELD_ENUM`: Value not in allowed enumeration
+- `FIELD_DEPENDENCY`: Missing dependent field
+- `FIELD_CONFLICT`: Conflicting field values
+- `PERFORMANCE_WARNING`: Performance concern
 
 ### Recovery (`recovery/`)
 

@@ -571,7 +571,7 @@ func TestProcessQuery_WithCustomStructuredQuery(t *testing.T) {
 
 	customParser := &mockParser{queries: make(map[string]*types.StructuredQuery)}
 	customQuery := &types.StructuredQuery{
-		LogSource: "oauth-server",
+		LogSource: "kube-apiserver",
 		Verb:      *types.NewStringOrArray("get"),
 		Resource:  *types.NewStringOrArray("users"),
 		Timeframe: "1_hour_ago",
@@ -620,8 +620,8 @@ func TestProcessQuery_WithCustomStructuredQuery(t *testing.T) {
 		t.Fatal("StructuredQuery should be of type *types.StructuredQuery")
 	}
 
-	if query.LogSource != "oauth-server" {
-		t.Errorf("Expected LogSource 'oauth-server', got: %s", query.LogSource)
+	if query.LogSource != "kube-apiserver" {
+		t.Errorf("Expected LogSource 'kube-apiserver', got: %s", query.LogSource)
 	}
 
 	if query.Timeframe != "1_hour_ago" {

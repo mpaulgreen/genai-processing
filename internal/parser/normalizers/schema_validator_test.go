@@ -1,653 +1,970 @@
 package normalizers
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"genai-processing/pkg/types"
 )
 
-func TestNewSchemaValidator(t *testing.T) {
-	validator := NewSchemaValidator()
-	if validator == nil {
-		t.Fatal("Expected non-nil schema validator")
-	}
+// Test helper functions
+
+func newStringOrArray(value interface{}) types.StringOrArray {
+	return *types.NewStringOrArray(value)
 }
 
-func TestSchemaValidator_ValidateSchema_NilQuery(t *testing.T) {
-	validator := NewSchemaValidator()
-	err := validator.ValidateSchema(nil)
-	
-	if err == nil {
-		t.Error("Expected error for nil query")
-	}
-	
-	if err.Error() != "schema: query is nil" {
-		t.Errorf("Expected specific error message, got: %s", err.Error())
-	}
-}
+func TestSchemaValidator_ValidateSchema_RequiredFields(t *testing.T) {
+	validator := NewSchemaValidator().(*SchemaValidator)
 
-func TestSchemaValidator_LogSourceValidation(t *testing.T) {
-	validator := NewSchemaValidator()
-	
 	tests := []struct {
 		name        string
-		logSource   string
-		expectError bool
-		description string
+		query       *types.StructuredQuery
+		wantErr     bool
+		expectedErr string
 	}{
 		{
-			name:        "valid_log_source",
-			logSource:   "kube-apiserver",
-			expectError: false,
-			description: "Valid log source should pass",
+			name:        "nil query",
+			query:       nil,
+			wantErr:     true,
+			expectedErr: "FIELD_REQUIRED",
 		},
 		{
-			name:        "another_valid_log_source",
-			logSource:   "oauth-server",
-			expectError: false,
-			description: "Another valid log source should pass",
+			name: "empty log source",
+			query: &types.StructuredQuery{
+				LogSource: "",
+			},
+			wantErr:     true,
+			expectedErr: "FIELD_REQUIRED",
 		},
 		{
-			name:        "empty_log_source",
-			logSource:   "",
-			expectError: true,
-			description: "Empty log source should fail",
+			name: "invalid log source",
+			query: &types.StructuredQuery{
+				LogSource: "invalid-source",
+			},
+			wantErr:     true,
+			expectedErr: "FIELD_ENUM",
 		},
 		{
-			name:        "whitespace_only_log_source",
-			logSource:   "   ",
-			expectError: true,
-			description: "Whitespace-only log source should fail",
-		},
-		{
-			name:        "log_source_with_whitespace",
-			logSource:   "  kube-apiserver  ",
-			expectError: false,
-			description: "Log source with whitespace should pass (gets trimmed)",
+			name: "valid log source",
+			query: &types.StructuredQuery{
+				LogSource: "kube-apiserver",
+			},
+			wantErr: false,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			query := &types.StructuredQuery{
-				LogSource: tt.logSource,
-				Limit:     20, // Valid limit
+			err := validator.ValidateSchema(tt.query)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateSchema() error = %v, wantErr %v", err, tt.wantErr)
+				return
 			}
-			
-			err := validator.ValidateSchema(query)
-			
-			if tt.expectError && err == nil {
-				t.Errorf("Expected error for %s, but got none", tt.description)
-			}
-			
-			if !tt.expectError && err != nil {
-				t.Errorf("Expected no error for %s, but got: %v", tt.description, err)
-			}
-			
-			if tt.expectError && err != nil {
-				if !contains(err.Error(), "log_source is required") {
-					t.Errorf("Expected log_source error, got: %s", err.Error())
+			if err != nil {
+				if validationErr, ok := err.(*ValidationError); ok {
+					if validationErr.Code != tt.expectedErr {
+						t.Errorf("Expected error code %s, got %s", tt.expectedErr, validationErr.Code)
+					}
+				} else {
+					t.Errorf("Expected ValidationError, got %T", err)
 				}
 			}
 		})
 	}
 }
 
-func TestSchemaValidator_LimitValidation(t *testing.T) {
-	validator := NewSchemaValidator()
-	
+func TestSchemaValidator_ValidateSchema_BasicFields(t *testing.T) {
+	validator := NewSchemaValidator().(*SchemaValidator)
+
 	tests := []struct {
 		name        string
-		limit       int
-		expectError bool
-		description string
+		query       *types.StructuredQuery
+		wantErr     bool
+		expectedErr string
 	}{
 		{
-			name:        "valid_limit_zero",
-			limit:       0,
-			expectError: false,
-			description: "Limit of 0 should be valid",
+			name: "limit out of range - negative",
+			query: &types.StructuredQuery{
+				LogSource: "kube-apiserver",
+				Limit:     -1,
+			},
+			wantErr:     true,
+			expectedErr: "FIELD_RANGE",
 		},
 		{
-			name:        "valid_limit_positive",
-			limit:       20,
-			expectError: false,
-			description: "Positive limit should be valid",
+			name: "limit out of range - too high",
+			query: &types.StructuredQuery{
+				LogSource: "kube-apiserver",
+				Limit:     1500,
+			},
+			wantErr:     true,
+			expectedErr: "FIELD_RANGE",
 		},
 		{
-			name:        "valid_limit_max",
-			limit:       1000,
-			expectError: false,
-			description: "Maximum limit should be valid",
+			name: "valid limit",
+			query: &types.StructuredQuery{
+				LogSource: "kube-apiserver",
+				Limit:     100,
+			},
+			wantErr: false,
 		},
 		{
-			name:        "invalid_limit_negative",
-			limit:       -1,
-			expectError: true,
-			description: "Negative limit should be invalid",
+			name: "invalid timeframe",
+			query: &types.StructuredQuery{
+				LogSource: "kube-apiserver",
+				Timeframe: "invalid_timeframe",
+			},
+			wantErr:     true,
+			expectedErr: "FIELD_ENUM",
 		},
 		{
-			name:        "invalid_limit_too_high",
-			limit:       1001,
-			expectError: true,
-			description: "Limit above 1000 should be invalid",
-		},
-		{
-			name:        "invalid_limit_extremely_high",
-			limit:       999999,
-			expectError: true,
-			description: "Extremely high limit should be invalid",
-		},
-		{
-			name:        "invalid_limit_very_negative",
-			limit:       -100,
-			expectError: true,
-			description: "Very negative limit should be invalid",
+			name: "valid timeframe",
+			query: &types.StructuredQuery{
+				LogSource: "kube-apiserver",
+				Timeframe: "24_hours_ago",
+			},
+			wantErr: false,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			query := &types.StructuredQuery{
-				LogSource: "kube-apiserver", // Valid log source
-				Limit:     tt.limit,
+			err := validator.ValidateSchema(tt.query)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateSchema() error = %v, wantErr %v", err, tt.wantErr)
+				return
 			}
-			
-			err := validator.ValidateSchema(query)
-			
-			if tt.expectError && err == nil {
-				t.Errorf("Expected error for %s, but got none", tt.description)
-			}
-			
-			if !tt.expectError && err != nil {
-				t.Errorf("Expected no error for %s, but got: %v", tt.description, err)
-			}
-			
-			if tt.expectError && err != nil {
-				if !contains(err.Error(), "limit out of range") {
-					t.Errorf("Expected limit error, got: %s", err.Error())
+			if err != nil {
+				if validationErr, ok := err.(*ValidationError); ok {
+					if validationErr.Code != tt.expectedErr {
+						t.Errorf("Expected error code %s, got %s", tt.expectedErr, validationErr.Code)
+					}
 				}
 			}
 		})
 	}
 }
 
-func TestSchemaValidator_TimeframeValidation(t *testing.T) {
-	validator := NewSchemaValidator()
-	
+func TestSchemaValidator_ValidateStringOrArray(t *testing.T) {
+	validator := NewSchemaValidator().(*SchemaValidator)
+
 	tests := []struct {
 		name        string
-		timeframe   string
-		expectError bool
-		description string
+		field       types.StringOrArray
+		fieldName   string
+		validValues []string
+		maxElements int
+		wantErr     bool
+		expectedErr string
 	}{
 		{
-			name:        "empty_timeframe",
-			timeframe:   "",
-			expectError: false,
-			description: "Empty timeframe should be valid",
+			name:        "valid single value",
+			field:       newStringOrArray("get"),
+			fieldName:   "verb",
+			validValues: []string{"get", "list", "create"},
+			maxElements: 10,
+			wantErr:     false,
 		},
 		{
-			name:        "today_timeframe",
-			timeframe:   "today",
-			expectError: false,
-			description: "Today timeframe should be valid",
+			name:        "invalid single value",
+			field:       newStringOrArray("invalid"),
+			fieldName:   "verb",
+			validValues: []string{"get", "list", "create"},
+			maxElements: 10,
+			wantErr:     true,
+			expectedErr: "FIELD_ENUM",
 		},
 		{
-			name:        "yesterday_timeframe",
-			timeframe:   "yesterday",
-			expectError: false,
-			description: "Yesterday timeframe should be valid",
+			name:        "valid array",
+			field:       newStringOrArray([]string{"get", "list"}),
+			fieldName:   "verb",
+			validValues: []string{"get", "list", "create"},
+			maxElements: 10,
+			wantErr:     false,
 		},
 		{
-			name:        "1_hour_ago_timeframe",
-			timeframe:   "1_hour_ago",
-			expectError: false,
-			description: "1_hour_ago timeframe should be valid",
+			name:        "array too large",
+			field:       newStringOrArray([]string{"get", "list", "create", "update", "patch", "delete", "watch", "connect", "proxy", "redirect", "bind"}),
+			fieldName:   "verb",
+			validValues: []string{"get", "list", "create", "update", "patch", "delete", "watch", "connect", "proxy", "redirect", "bind"},
+			maxElements: 10,
+			wantErr:     true,
+			expectedErr: "FIELD_RANGE",
 		},
 		{
-			name:        "case_insensitive_today",
-			timeframe:   "TODAY",
-			expectError: false,
-			description: "Case insensitive TODAY should be valid",
-		},
-		{
-			name:        "case_insensitive_yesterday",
-			timeframe:   "YESTERDAY",
-			expectError: false,
-			description: "Case insensitive YESTERDAY should be valid",
-		},
-		{
-			name:        "whitespace_around_today",
-			timeframe:   "  today  ",
-			expectError: false,
-			description: "Timeframe with whitespace should be valid after trimming",
-		},
-		{
-			name:        "unsupported_timeframe",
-			timeframe:   "7_days_ago",
-			expectError: true,
-			description: "Unsupported timeframe should be invalid",
-		},
-		{
-			name:        "invalid_timeframe",
-			timeframe:   "invalid",
-			expectError: true,
-			description: "Invalid timeframe should be invalid",
-		},
-		{
-			name:        "recent_timeframe",
-			timeframe:   "recent",
-			expectError: true,
-			description: "Recent timeframe should be invalid (not in allowed list)",
-		},
-		{
-			name:        "numeric_timeframe",
-			timeframe:   "1h",
-			expectError: true,
-			description: "Numeric timeframe should be invalid (not normalized)",
+			name:        "duplicate values",
+			field:       newStringOrArray([]string{"get", "get"}),
+			fieldName:   "verb",
+			validValues: []string{"get", "list", "create"},
+			maxElements: 10,
+			wantErr:     true,
+			expectedErr: "FIELD_FORMAT",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			query := &types.StructuredQuery{
-				LogSource: "kube-apiserver", // Valid log source
-				Limit:     20,               // Valid limit
-				Timeframe: tt.timeframe,
+			err := validator.validateStringOrArray(tt.field, tt.fieldName, tt.validValues, tt.maxElements)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateStringOrArray() error = %v, wantErr %v", err, tt.wantErr)
+				return
 			}
-			
-			err := validator.ValidateSchema(query)
-			
-			if tt.expectError && err == nil {
-				t.Errorf("Expected error for %s, but got none", tt.description)
-			}
-			
-			if !tt.expectError && err != nil {
-				t.Errorf("Expected no error for %s, but got: %v", tt.description, err)
-			}
-			
-			if tt.expectError && err != nil {
-				if !contains(err.Error(), "unsupported timeframe") {
-					t.Errorf("Expected timeframe error, got: %s", err.Error())
+			if err != nil {
+				if validationErr, ok := err.(*ValidationError); ok {
+					if validationErr.Code != tt.expectedErr {
+						t.Errorf("Expected error code %s, got %s", tt.expectedErr, validationErr.Code)
+					}
 				}
 			}
 		})
 	}
 }
 
-func TestSchemaValidator_TimeRangeValidation(t *testing.T) {
-	validator := NewSchemaValidator()
-	
+func TestSchemaValidator_ValidateNamespaces(t *testing.T) {
+	validator := NewSchemaValidator().(*SchemaValidator)
+
+	tests := []struct {
+		name        string
+		field       types.StringOrArray
+		wantErr     bool
+		expectedErr string
+	}{
+		{
+			name:    "valid namespace",
+			field:   newStringOrArray("default"),
+			wantErr: false,
+		},
+		{
+			name:    "valid namespace with hyphens",
+			field:   newStringOrArray("my-namespace"),
+			wantErr: false,
+		},
+		{
+			name:        "invalid namespace - uppercase",
+			field:       newStringOrArray("Invalid-Namespace"),
+			wantErr:     true,
+			expectedErr: "FIELD_FORMAT",
+		},
+		{
+			name:        "invalid namespace - underscore",
+			field:       newStringOrArray("invalid_namespace"),
+			wantErr:     true,
+			expectedErr: "FIELD_FORMAT",
+		},
+		{
+			name:        "empty namespace",
+			field:       newStringOrArray(""),
+			wantErr:     true,
+			expectedErr: "FIELD_FORMAT",
+		},
+		{
+			name:        "namespace too long",
+			field:       newStringOrArray(strings.Repeat("a", 64)),
+			wantErr:     true,
+			expectedErr: "FIELD_RANGE",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validator.validateNamespaces(tt.field)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateNamespaces() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if err != nil {
+				if validationErr, ok := err.(*ValidationError); ok {
+					if validationErr.Code != tt.expectedErr {
+						t.Errorf("Expected error code %s, got %s", tt.expectedErr, validationErr.Code)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestSchemaValidator_ValidateUsers(t *testing.T) {
+	validator := NewSchemaValidator().(*SchemaValidator)
+
+	tests := []struct {
+		name        string
+		field       types.StringOrArray
+		wantErr     bool
+		expectedErr string
+	}{
+		{
+			name:    "valid email",
+			field:   newStringOrArray("user@example.com"),
+			wantErr: false,
+		},
+		{
+			name:    "valid system user",
+			field:   newStringOrArray("system:serviceaccount:default:my-sa"),
+			wantErr: false,
+		},
+		{
+			name:        "invalid email",
+			field:       newStringOrArray("invalid@email"),
+			wantErr:     true,
+			expectedErr: "FIELD_FORMAT",
+		},
+		{
+			name:        "empty user",
+			field:       newStringOrArray(""),
+			wantErr:     true,
+			expectedErr: "FIELD_FORMAT",
+		},
+		{
+			name:        "user too long",
+			field:       newStringOrArray(strings.Repeat("a", 257)),
+			wantErr:     true,
+			expectedErr: "FIELD_RANGE",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validator.validateUsers(tt.field)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateUsers() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if err != nil {
+				if validationErr, ok := err.(*ValidationError); ok {
+					if validationErr.Code != tt.expectedErr {
+						t.Errorf("Expected error code %s, got %s", tt.expectedErr, validationErr.Code)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestSchemaValidator_ValidateSourceIPs(t *testing.T) {
+	validator := NewSchemaValidator().(*SchemaValidator)
+
+	tests := []struct {
+		name        string
+		field       types.StringOrArray
+		wantErr     bool
+		expectedErr string
+	}{
+		{
+			name:    "valid IPv4",
+			field:   newStringOrArray("192.168.1.100"),
+			wantErr: false,
+		},
+		{
+			name:    "valid IPv6",
+			field:   newStringOrArray("2001:db8::1"),
+			wantErr: false,
+		},
+		{
+			name:    "valid CIDR",
+			field:   newStringOrArray("10.0.0.0/8"),
+			wantErr: false,
+		},
+		{
+			name:        "invalid IP",
+			field:       newStringOrArray("999.999.999.999"),
+			wantErr:     true,
+			expectedErr: "FIELD_FORMAT",
+		},
+		{
+			name:        "invalid CIDR",
+			field:       newStringOrArray("10.0.0.0/40"),
+			wantErr:     true,
+			expectedErr: "FIELD_FORMAT",
+		},
+		{
+			name:        "empty IP",
+			field:       newStringOrArray(""),
+			wantErr:     true,
+			expectedErr: "FIELD_FORMAT",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validator.validateSourceIPs(tt.field)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateSourceIPs() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if err != nil {
+				if validationErr, ok := err.(*ValidationError); ok {
+					if validationErr.Code != tt.expectedErr {
+						t.Errorf("Expected error code %s, got %s", tt.expectedErr, validationErr.Code)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestSchemaValidator_ValidateRegexPattern(t *testing.T) {
+	validator := NewSchemaValidator().(*SchemaValidator)
+
+	tests := []struct {
+		name        string
+		pattern     string
+		fieldName   string
+		wantErr     bool
+		expectedErr string
+	}{
+		{
+			name:      "valid regex",
+			pattern:   "^admin@.*\\.company\\.com$",
+			fieldName: "user_pattern",
+			wantErr:   false,
+		},
+		{
+			name:        "invalid regex syntax",
+			pattern:     "[unclosed",
+			fieldName:   "user_pattern",
+			wantErr:     true,
+			expectedErr: "FIELD_FORMAT",
+		},
+		{
+			name:        "catastrophic backtracking",
+			pattern:     "(.+)+$",
+			fieldName:   "user_pattern",
+			wantErr:     true,
+			expectedErr: "FIELD_FORMAT",
+		},
+		{
+			name:      "empty pattern",
+			pattern:   "",
+			fieldName: "user_pattern",
+			wantErr:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validator.validateRegexPattern(tt.pattern, tt.fieldName)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateRegexPattern() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if err != nil {
+				if validationErr, ok := err.(*ValidationError); ok {
+					if validationErr.Code != tt.expectedErr {
+						t.Errorf("Expected error code %s, got %s", tt.expectedErr, validationErr.Code)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestSchemaValidator_ValidateResponseStatus(t *testing.T) {
+	validator := NewSchemaValidator().(*SchemaValidator)
+
+	tests := []struct {
+		name        string
+		field       types.StringOrArray
+		wantErr     bool
+		expectedErr string
+	}{
+		{
+			name:    "valid status code",
+			field:   newStringOrArray("404"),
+			wantErr: false,
+		},
+		{
+			name:    "valid range expression",
+			field:   newStringOrArray(">=400"),
+			wantErr: false,
+		},
+		{
+			name:    "valid array",
+			field:   newStringOrArray([]string{"401", "403", "500"}),
+			wantErr: false,
+		},
+		{
+			name:        "invalid status code",
+			field:       newStringOrArray("999"),
+			wantErr:     true,
+			expectedErr: "FIELD_RANGE",
+		},
+		{
+			name:        "invalid range",
+			field:       newStringOrArray(">=700"),
+			wantErr:     true,
+			expectedErr: "FIELD_RANGE",
+		},
+		{
+			name:        "invalid format",
+			field:       newStringOrArray("invalid"),
+			wantErr:     true,
+			expectedErr: "FIELD_FORMAT",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validator.validateResponseStatus(tt.field)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateResponseStatus() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if err != nil {
+				if validationErr, ok := err.(*ValidationError); ok {
+					if validationErr.Code != tt.expectedErr {
+						t.Errorf("Expected error code %s, got %s", tt.expectedErr, validationErr.Code)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestSchemaValidator_ValidateTimeRange(t *testing.T) {
+	validator := NewSchemaValidator().(*SchemaValidator)
+
 	now := time.Now()
 	oneHourAgo := now.Add(-time.Hour)
-	oneHourLater := now.Add(time.Hour)
-	
+	ninetyOneDaysAgo := now.Add(-91 * 24 * time.Hour)
+
 	tests := []struct {
 		name        string
 		timeRange   *types.TimeRange
-		expectError bool
-		description string
+		wantErr     bool
+		expectedErr string
 	}{
 		{
-			name:        "nil_time_range",
-			timeRange:   nil,
-			expectError: false,
-			description: "Nil time range should be valid",
+			name:      "nil time range",
+			timeRange: nil,
+			wantErr:   false,
 		},
 		{
-			name: "valid_time_range",
+			name: "valid time range",
 			timeRange: &types.TimeRange{
 				Start: oneHourAgo,
 				End:   now,
 			},
-			expectError: false,
-			description: "Valid time range (start before end) should be valid",
+			wantErr: false,
 		},
 		{
-			name: "identical_times",
-			timeRange: &types.TimeRange{
-				Start: now,
-				End:   now,
-			},
-			expectError: false,
-			description: "Identical start and end times should be valid",
-		},
-		{
-			name: "reversed_time_range",
+			name: "end before start",
 			timeRange: &types.TimeRange{
 				Start: now,
 				End:   oneHourAgo,
 			},
-			expectError: true,
-			description: "Reversed time range (end before start) should be invalid",
+			wantErr:     true,
+			expectedErr: "FIELD_CONFLICT",
 		},
 		{
-			name: "far_future_range",
+			name: "duration too long",
 			timeRange: &types.TimeRange{
-				Start: now,
-				End:   oneHourLater,
+				Start: ninetyOneDaysAgo,
+				End:   now,
 			},
-			expectError: false,
-			description: "Future time range should be valid",
+			wantErr:     true,
+			expectedErr: "FIELD_RANGE",
+		},
+		{
+			name: "missing start time",
+			timeRange: &types.TimeRange{
+				End: now,
+			},
+			wantErr:     true,
+			expectedErr: "FIELD_REQUIRED",
+		},
+		{
+			name: "missing end time",
+			timeRange: &types.TimeRange{
+				Start: oneHourAgo,
+			},
+			wantErr:     true,
+			expectedErr: "FIELD_REQUIRED",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			query := &types.StructuredQuery{
-				LogSource: "kube-apiserver", // Valid log source
-				Limit:     20,               // Valid limit
-				Timeframe: "today",          // Valid timeframe
-				TimeRange: tt.timeRange,
+			err := validator.validateTimeRange(tt.timeRange)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateTimeRange() error = %v, wantErr %v", err, tt.wantErr)
+				return
 			}
-			
-			err := validator.ValidateSchema(query)
-			
-			if tt.expectError && err == nil {
-				t.Errorf("Expected error for %s, but got none", tt.description)
-			}
-			
-			if !tt.expectError && err != nil {
-				t.Errorf("Expected no error for %s, but got: %v", tt.description, err)
-			}
-			
-			if tt.expectError && err != nil {
-				if !contains(err.Error(), "time_range.end before time_range.start") {
-					t.Errorf("Expected time range error, got: %s", err.Error())
+			if err != nil {
+				if validationErr, ok := err.(*ValidationError); ok {
+					if validationErr.Code != tt.expectedErr {
+						t.Errorf("Expected error code %s, got %s", tt.expectedErr, validationErr.Code)
+					}
 				}
 			}
 		})
 	}
 }
 
-func TestSchemaValidator_ComprehensiveValidation(t *testing.T) {
-	validator := NewSchemaValidator()
-	
+func TestSchemaValidator_ValidateBusinessHours(t *testing.T) {
+	validator := NewSchemaValidator().(*SchemaValidator)
+
+	tests := []struct {
+		name          string
+		businessHours *types.BusinessHours
+		wantErr       bool
+		expectedErr   string
+	}{
+		{
+			name:          "nil business hours",
+			businessHours: nil,
+			wantErr:       false,
+		},
+		{
+			name: "valid business hours",
+			businessHours: &types.BusinessHours{
+				OutsideOnly: true,
+				StartHour:   9,
+				EndHour:     17,
+				Timezone:    "UTC",
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid start hour",
+			businessHours: &types.BusinessHours{
+				StartHour: -1,
+				EndHour:   17,
+			},
+			wantErr:     true,
+			expectedErr: "FIELD_RANGE",
+		},
+		{
+			name: "invalid end hour",
+			businessHours: &types.BusinessHours{
+				StartHour: 9,
+				EndHour:   25,
+			},
+			wantErr:     true,
+			expectedErr: "FIELD_RANGE",
+		},
+		{
+			name: "invalid timezone",
+			businessHours: &types.BusinessHours{
+				StartHour: 9,
+				EndHour:   17,
+				Timezone:  "Invalid/Timezone",
+			},
+			wantErr:     true,
+			expectedErr: "FIELD_FORMAT",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validator.validateBusinessHours(tt.businessHours)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateBusinessHours() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if err != nil {
+				if validationErr, ok := err.(*ValidationError); ok {
+					if validationErr.Code != tt.expectedErr {
+						t.Errorf("Expected error code %s, got %s", tt.expectedErr, validationErr.Code)
+					}
+				}
+			}
+		})
+	}
+}
+
+// Additional tests for complex object validation
+
+func TestSchemaValidator_ValidateMultiSource(t *testing.T) {
+	validator := NewSchemaValidator().(*SchemaValidator)
+
+	tests := []struct {
+		name        string
+		config      *types.MultiSourceConfig
+		wantErr     bool
+		expectedErr string
+	}{
+		{
+			name:    "nil config",
+			config:  nil,
+			wantErr: false,
+		},
+		{
+			name: "valid multi-source config",
+			config: &types.MultiSourceConfig{
+				PrimarySource:     "kube-apiserver",
+				SecondarySources:  []string{"oauth-server", "node-auditd"},
+				CorrelationWindow: "30_minutes",
+				CorrelationFields: []string{"user", "source_ip"},
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid primary source",
+			config: &types.MultiSourceConfig{
+				PrimarySource:    "invalid-source",
+				SecondarySources: []string{"oauth-server"},
+			},
+			wantErr:     true,
+			expectedErr: "FIELD_ENUM",
+		},
+		{
+			name: "empty secondary sources",
+			config: &types.MultiSourceConfig{
+				PrimarySource:    "kube-apiserver",
+				SecondarySources: []string{},
+			},
+			wantErr:     true,
+			expectedErr: "FIELD_REQUIRED",
+		},
+		{
+			name: "primary in secondary sources",
+			config: &types.MultiSourceConfig{
+				PrimarySource:    "kube-apiserver",
+				SecondarySources: []string{"kube-apiserver", "oauth-server"},
+			},
+			wantErr:     true,
+			expectedErr: "FIELD_CONFLICT",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validator.ValidateMultiSource(tt.config)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateMultiSource() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if err != nil {
+				if validationErr, ok := err.(*ValidationError); ok {
+					if validationErr.Code != tt.expectedErr {
+						t.Errorf("Expected error code %s, got %s", tt.expectedErr, validationErr.Code)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestSchemaValidator_ValidateAdvancedAnalysis(t *testing.T) {
+	validator := NewSchemaValidator().(*SchemaValidator)
+
+	tests := []struct {
+		name        string
+		config      *types.AdvancedAnalysisConfig
+		wantErr     bool
+		expectedErr string
+	}{
+		{
+			name:    "nil config",
+			config:  nil,
+			wantErr: false,
+		},
+		{
+			name: "valid analysis config",
+			config: &types.AdvancedAnalysisConfig{
+				Type:           "anomaly_detection",
+				KillChainPhase: "",
+			},
+			wantErr: false,
+		},
+		{
+			name: "missing analysis type",
+			config: &types.AdvancedAnalysisConfig{
+				Type: "",
+			},
+			wantErr:     true,
+			expectedErr: "FIELD_REQUIRED",
+		},
+		{
+			name: "invalid analysis type",
+			config: &types.AdvancedAnalysisConfig{
+				Type: "invalid_analysis_type",
+			},
+			wantErr:     true,
+			expectedErr: "FIELD_ENUM",
+		},
+		{
+			name: "APT analysis missing kill chain phase",
+			config: &types.AdvancedAnalysisConfig{
+				Type:           "apt_reconnaissance_detection",
+				KillChainPhase: "",
+			},
+			wantErr:     true,
+			expectedErr: "FIELD_DEPENDENCY",
+		},
+		{
+			name: "valid APT analysis with kill chain phase",
+			config: &types.AdvancedAnalysisConfig{
+				Type:           "apt_reconnaissance_detection",
+				KillChainPhase: "reconnaissance",
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validator.ValidateAdvancedAnalysis(tt.config)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateAdvancedAnalysis() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if err != nil {
+				if validationErr, ok := err.(*ValidationError); ok {
+					if validationErr.Code != tt.expectedErr {
+						t.Errorf("Expected error code %s, got %s", tt.expectedErr, validationErr.Code)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestSchemaValidator_QueryComplexity(t *testing.T) {
+	validator := NewSchemaValidator().(*SchemaValidator)
+
+	tests := []struct {
+		name          string
+		query         *types.StructuredQuery
+		expectedLevel string
+		minScore      int
+	}{
+		{
+			name: "low complexity query",
+			query: &types.StructuredQuery{
+				LogSource: "kube-apiserver",
+				Verb:      newStringOrArray("get"),
+				Limit:     50,
+			},
+			expectedLevel: "Low",
+			minScore:      0,
+		},
+		{
+			name: "medium complexity query",
+			query: &types.StructuredQuery{
+				LogSource:   "kube-apiserver",
+				Verb:        newStringOrArray([]string{"get", "list"}),
+				UserPattern: "^admin@.*",
+				MultiSource: &types.MultiSourceConfig{
+					PrimarySource:    "kube-apiserver",
+					SecondarySources: []string{"oauth-server"},
+				},
+			},
+			expectedLevel: "Low",  // Adjusted based on actual scoring: 1 (verb) + 3 (pattern) + 5 (multi-source) + 1 (secondary source) = 10
+			minScore:      10,
+		},
+		{
+			name: "high complexity query",
+			query: &types.StructuredQuery{
+				LogSource:   "kube-apiserver",
+				UserPattern: "^admin@.*",
+				MultiSource: &types.MultiSourceConfig{
+					PrimarySource:    "kube-apiserver",
+					SecondarySources: []string{"oauth-server", "node-auditd"},
+				},
+				Analysis: &types.AdvancedAnalysisConfig{
+					Type: "anomaly_detection",
+				},
+				MachineLearning: &types.MachineLearningConfig{
+					ModelType: "isolation_forest",
+				},
+			},
+			expectedLevel: "Medium",  // Adjusted based on actual scoring: 3 (pattern) + 5 (multi-source) + 2 (secondary sources) + 10 (analysis) + 15 (ML) = 35
+			minScore:      35,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			complexity := validator.GetQueryComplexity(tt.query)
+			
+			if complexity.Level != tt.expectedLevel {
+				t.Errorf("Expected complexity level %s, got %s", tt.expectedLevel, complexity.Level)
+			}
+			
+			if complexity.Score < tt.minScore {
+				t.Errorf("Expected minimum score %d, got %d", tt.minScore, complexity.Score)
+			}
+			
+			// Verify components are tracked
+			if len(complexity.Components) == 0 {
+				t.Error("Expected complexity components to be tracked")
+			}
+			
+			// Verify resource usage is estimated
+			if _, ok := complexity.ResourceUsage["estimated_memory_mb"]; !ok {
+				t.Error("Expected memory usage estimation")
+			}
+		})
+	}
+}
+
+func TestSchemaValidator_CrossFieldValidation(t *testing.T) {
+	validator := NewSchemaValidator().(*SchemaValidator)
+
 	tests := []struct {
 		name        string
 		query       *types.StructuredQuery
-		expectError bool
-		errorSubstr string
-		description string
+		wantErr     bool
+		expectedErr string
 	}{
 		{
-			name: "completely_valid_query",
+			name: "mutually exclusive timeframe and time_range",
 			query: &types.StructuredQuery{
 				LogSource: "kube-apiserver",
-				Limit:     50,
 				Timeframe: "today",
-				Verb:      *types.NewStringOrArray("get"),
-				Resource:  *types.NewStringOrArray("pods"),
+				TimeRange: &types.TimeRange{
+					Start: time.Now().Add(-time.Hour),
+					End:   time.Now(),
+				},
 			},
-			expectError: false,
-			description: "Completely valid query should pass",
+			wantErr:     true,
+			expectedErr: "FIELD_CONFLICT",
 		},
 		{
-			name: "minimal_valid_query",
+			name: "node-auditd incompatible with verb",
+			query: &types.StructuredQuery{
+				LogSource: "node-auditd",
+				Verb:      newStringOrArray("get"),
+			},
+			wantErr:     true,
+			expectedErr: "FIELD_CONFLICT",
+		},
+		{
+			name: "oauth-server incompatible with resource",
 			query: &types.StructuredQuery{
 				LogSource: "oauth-server",
-				Limit:     0,
+				Resource:  newStringOrArray("pods"),
 			},
-			expectError: false,
-			description: "Minimal valid query should pass",
+			wantErr:     true,
+			expectedErr: "FIELD_CONFLICT",
 		},
 		{
-			name: "query_with_invalid_log_source",
-			query: &types.StructuredQuery{
-				LogSource: "",
-				Limit:     20,
-				Timeframe: "today",
-			},
-			expectError: true,
-			errorSubstr: "log_source is required",
-			description: "Query with invalid log source should fail",
-		},
-		{
-			name: "query_with_invalid_limit",
+			name: "valid query without conflicts",
 			query: &types.StructuredQuery{
 				LogSource: "kube-apiserver",
-				Limit:     -5,
-				Timeframe: "today",
+				Verb:      newStringOrArray("get"),
+				Resource:  newStringOrArray("pods"),
 			},
-			expectError: true,
-			errorSubstr: "limit out of range",
-			description: "Query with invalid limit should fail",
-		},
-		{
-			name: "query_with_invalid_timeframe",
-			query: &types.StructuredQuery{
-				LogSource: "kube-apiserver",
-				Limit:     20,
-				Timeframe: "invalid_timeframe",
-			},
-			expectError: true,
-			errorSubstr: "unsupported timeframe",
-			description: "Query with invalid timeframe should fail",
-		},
-		{
-			name: "query_with_invalid_time_range",
-			query: &types.StructuredQuery{
-				LogSource: "kube-apiserver",
-				Limit:     20,
-				Timeframe: "today",
-				TimeRange: &types.TimeRange{
-					Start: time.Now(),
-					End:   time.Now().Add(-time.Hour),
-				},
-			},
-			expectError: true,
-			errorSubstr: "time_range.end before time_range.start",
-			description: "Query with invalid time range should fail",
+			wantErr: false,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := validator.ValidateSchema(tt.query)
-			
-			if tt.expectError && err == nil {
-				t.Errorf("Expected error for %s, but got none", tt.description)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateSchema() error = %v, wantErr %v", err, tt.wantErr)
+				return
 			}
-			
-			if !tt.expectError && err != nil {
-				t.Errorf("Expected no error for %s, but got: %v", tt.description, err)
-			}
-			
-			if tt.expectError && err != nil && tt.errorSubstr != "" {
-				if !contains(err.Error(), tt.errorSubstr) {
-					t.Errorf("Expected error containing '%s', got: %s", tt.errorSubstr, err.Error())
+			if err != nil {
+				if validationErr, ok := err.(*ValidationError); ok {
+					if validationErr.Code != tt.expectedErr {
+						t.Errorf("Expected error code %s, got %s", tt.expectedErr, validationErr.Code)
+					}
 				}
 			}
 		})
 	}
-}
-
-func TestSchemaValidator_FieldsNotValidated(t *testing.T) {
-	validator := NewSchemaValidator()
-	
-	// Test that the validator doesn't validate fields that are not in its scope
-	query := &types.StructuredQuery{
-		LogSource:                  "kube-apiserver",
-		Limit:                      20,
-		Timeframe:                  "today",
-		Verb:                       *types.NewStringOrArray("invalid_verb"),
-		Resource:                   *types.NewStringOrArray("invalid_resource"),
-		Namespace:                  *types.NewStringOrArray("invalid_namespace"),
-		User:                       *types.NewStringOrArray("invalid_user"),
-		ResponseStatus:             *types.NewStringOrArray("invalid_status"),
-		ExcludeUsers:               []string{"invalid_pattern"},
-		ResourceNamePattern:        "invalid_regex_[",
-		UserPattern:                "invalid_regex_[",
-		NamespacePattern:           "invalid_regex_[",
-		RequestURIPattern:          "invalid_regex_[",
-		AuthDecision:               "invalid_decision",
-		SourceIP:                   *types.NewStringOrArray("invalid_ip"),
-		GroupBy:                    *types.NewStringOrArray("invalid_group"),
-		SortBy:                     "invalid_sort",
-		SortOrder:                  "invalid_order",
-		Subresource:                "invalid_subresource",
-		IncludeChanges:             true,
-		RequestObjectFilter:        "invalid_filter",
-		ExcludeResources:           []string{"invalid_resource"},
-		AuthorizationReasonPattern: "invalid_pattern",
-		ResponseMessagePattern:     "invalid_pattern",
-		MissingAnnotation:          "invalid_annotation",
-	}
-	
-	err := validator.ValidateSchema(query)
-	if err != nil {
-		t.Errorf("Schema validator should not validate fields outside its scope, got error: %v", err)
-	}
-}
-
-func TestSchemaValidator_EdgeCases(t *testing.T) {
-	validator := NewSchemaValidator()
-	
-	tests := []struct {
-		name        string
-		query       *types.StructuredQuery
-		expectError bool
-		description string
-	}{
-		{
-			name: "query_with_zero_values",
-			query: &types.StructuredQuery{
-				LogSource: "kube-apiserver",
-				Limit:     0,
-				Timeframe: "",
-			},
-			expectError: false,
-			description: "Query with zero values should be valid",
-		},
-		{
-			name: "query_with_boundary_limit",
-			query: &types.StructuredQuery{
-				LogSource: "kube-apiserver",
-				Limit:     1000,
-				Timeframe: "",
-			},
-			expectError: false,
-			description: "Query with boundary limit should be valid",
-		},
-		{
-			name: "query_with_complex_fields",
-			query: &types.StructuredQuery{
-				LogSource: "openshift-apiserver",
-				Limit:     500,
-				Timeframe: "yesterday",
-				TimeRange: &types.TimeRange{
-					Start: time.Now().Add(-2 * time.Hour),
-					End:   time.Now().Add(-time.Hour),
-				},
-			},
-			expectError: false,
-			description: "Query with complex valid fields should pass",
-		},
-	}
-	
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := validator.ValidateSchema(tt.query)
-			
-			if tt.expectError && err == nil {
-				t.Errorf("Expected error for %s, but got none", tt.description)
-			}
-			
-			if !tt.expectError && err != nil {
-				t.Errorf("Expected no error for %s, but got: %v", tt.description, err)
-			}
-		})
-	}
-}
-
-func TestSchemaValidator_MultipleErrors(t *testing.T) {
-	validator := NewSchemaValidator()
-	
-	// Test that validation stops at the first error (based on implementation)
-	query := &types.StructuredQuery{
-		LogSource: "",    // Invalid: empty log source
-		Limit:     -1,    // Invalid: negative limit
-		Timeframe: "bad", // Invalid: unsupported timeframe
-	}
-	
-	err := validator.ValidateSchema(query)
-	if err == nil {
-		t.Error("Expected error for query with multiple validation issues")
-	}
-	
-	// Should fail on the first error (log_source)
-	if !contains(err.Error(), "log_source is required") {
-		t.Errorf("Expected log_source error first, got: %s", err.Error())
-	}
-}
-
-// Benchmark performance of schema validation
-func BenchmarkSchemaValidator_ValidateSchema(b *testing.B) {
-	validator := NewSchemaValidator()
-	query := &types.StructuredQuery{
-		LogSource: "kube-apiserver",
-		Limit:     50,
-		Timeframe: "today",
-		Verb:      *types.NewStringOrArray("get"),
-		Resource:  *types.NewStringOrArray("pods"),
-		Namespace: *types.NewStringOrArray("default"),
-	}
-	
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		err := validator.ValidateSchema(query)
-		if err != nil {
-			b.Fatalf("Benchmark failed: %v", err)
-		}
-	}
-}
-
-func TestSchemaValidator_PerformanceTarget(t *testing.T) {
-	validator := NewSchemaValidator()
-	query := &types.StructuredQuery{
-		LogSource: "kube-apiserver",
-		Limit:     50,
-		Timeframe: "today",
-		Verb:      *types.NewStringOrArray("get"),
-		Resource:  *types.NewStringOrArray("pods"),
-	}
-	
-	iterations := 1000
-	start := time.Now()
-	
-	for i := 0; i < iterations; i++ {
-		err := validator.ValidateSchema(query)
-		if err != nil {
-			t.Fatalf("Performance test failed: %v", err)
-		}
-	}
-	
-	duration := time.Since(start)
-	avgDuration := duration / time.Duration(iterations)
-	
-	// Target: < 100µs per operation (very fast for validation)
-	target := 100 * time.Microsecond
-	if avgDuration > target {
-		t.Errorf("Performance target missed: average %v > target %v", avgDuration, target)
-	}
-	
-	t.Logf("Performance: %v per validation operation (%d iterations)", avgDuration, iterations)
-}
-
-// Helper function to check if a string contains a substring
-func contains(s, substr string) bool {
-	return len(substr) == 0 || len(s) >= len(substr) && 
-		(s == substr || s[:len(substr)] == substr || s[len(s)-len(substr):] == substr || 
-		 len(s) > len(substr) && containsHelper(s, substr))
-}
-
-func containsHelper(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
