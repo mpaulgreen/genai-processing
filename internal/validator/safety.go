@@ -1,33 +1,39 @@
 package validator
 
 import (
+	"fmt"
 	"time"
 
+	"genai-processing/internal/parser/normalizers"
 	"genai-processing/internal/validator/rules"
 	"genai-processing/pkg/interfaces"
 	"genai-processing/pkg/types"
 )
 
 // SafetyValidator implements the SafetyValidator interface for validating
-// generated queries for safety and feasibility.
+// generated queries for safety and feasibility with enhanced capabilities.
 type SafetyValidator struct {
-	config         *ValidationConfig
-	rules          []interfaces.ValidationRule
-	whitelist      *rules.WhitelistRule
-	sanitization   *rules.SanitizationRule
-	timeframe      *rules.TimeframeRule
-	patterns       *rules.PatternsRule
-	requiredFields *rules.RequiredFieldsRule
+	config              *ValidationConfig
+	schemaValidator     interfaces.SchemaValidator
+	ruleEngine          *RuleEngine
+	// Legacy rules for backward compatibility
+	rules               []interfaces.ValidationRule
+	whitelist           *rules.WhitelistRule
+	sanitization        *rules.SanitizationRule
+	timeframe           *rules.TimeframeRule
+	patterns            *rules.PatternsRule
+	requiredFields      *rules.RequiredFieldsRule
 }
 
 // NewSafetyValidator creates a new instance of SafetyValidator.
-// This constructor initializes the validator with validation rules from configuration.
+// This constructor initializes the validator with validation rules from configuration
+// and integrates with the enhanced schema validator and rule engine.
 func NewSafetyValidator() *SafetyValidator {
 	config, err := LoadDefaultValidationConfig()
 	if err != nil {
 		// Fallback to default configuration if config file cannot be loaded
 		config = &ValidationConfig{}
-		config.SafetyRules.AllowedLogSources = []string{"kube-apiserver", "openshift-apiserver", "oauth-server", "oauth-apiserver"}
+		config.SafetyRules.AllowedLogSources = []string{"kube-apiserver", "openshift-apiserver", "oauth-server", "oauth-apiserver", "node-auditd"}
 		config.SafetyRules.AllowedVerbs = []string{"get", "list", "create", "update", "patch", "delete", "watch"}
 		config.SafetyRules.AllowedResources = []string{"pods", "services", "deployments", "configmaps", "secrets", "namespaces"}
 		config.SafetyRules.ForbiddenPatterns = []string{"rm -rf", "delete --all", "system:admin", "cluster-admin"}
@@ -50,14 +56,19 @@ func NewSafetyValidator() *SafetyValidator {
 
 		// Add default required fields
 		config.SafetyRules.RequiredFields = []string{"log_source"}
+		
+		// Apply defaults for rule engine
+		config.ApplyDefaults()
 	}
 
 	validator := &SafetyValidator{
-		config: config,
+		config:          config,
+		schemaValidator: normalizers.NewSchemaValidator(),
+		ruleEngine:      NewRuleEngine(config),
 	}
 
-	// Initialize validation rules
-	validator.initializeRules()
+	// Initialize legacy validation rules for backward compatibility
+	validator.initializeLegacyRules()
 
 	return validator
 }
@@ -65,47 +76,33 @@ func NewSafetyValidator() *SafetyValidator {
 // NewSafetyValidatorWithConfig creates a new instance of SafetyValidator with custom configuration.
 func NewSafetyValidatorWithConfig(config *ValidationConfig) *SafetyValidator {
 	validator := &SafetyValidator{
-		config: config,
+		config:          config,
+		schemaValidator: normalizers.NewSchemaValidator(),
+		ruleEngine:      NewRuleEngine(config),
 	}
 
-	// Initialize validation rules
-	validator.initializeRules()
+	// Initialize legacy validation rules for backward compatibility
+	validator.initializeLegacyRules()
 
 	return validator
 }
 
 // ValidateQuery validates a structured query for safety and feasibility.
-// This implementation applies comprehensive validation rules including:
-// - Whitelist validation for log sources, verbs, and resources
-// - Input sanitization to prevent injection attacks
-// - Timeframe limits and constraints
-// - Forbidden patterns and commands
-// - Query limits and business rules
+// This enhanced implementation integrates schema validation with comprehensive safety rules:
+// Phase 1: Schema validation (types, constraints, dependencies)
+// Phase 2: Basic safety rules (whitelist, sanitization, patterns)
+// Phase 3: Advanced safety rules (analysis, multi-source, behavioral)
+// Phase 4: Performance and compliance validation
 func (sv *SafetyValidator) ValidateQuery(query *types.StructuredQuery) (*interfaces.ValidationResult, error) {
 	// Handle nil query
 	if query == nil {
-		return &interfaces.ValidationResult{
-			IsValid:  false,
-			RuleName: "null_query_validation",
-			Severity: "critical",
-			Message:  "Query cannot be nil",
-			Details: map[string]interface{}{
-				"rule_results":         make(map[string]*interfaces.ValidationResult),
-				"total_rules_applied":  0,
-				"validation_timestamp": time.Now().Format(time.RFC3339),
-			},
-			Recommendations: []string{"Provide a valid structured query"},
-			Warnings:        []string{},
-			Errors:          []string{"Query is nil"},
-			Timestamp:       time.Now().Format(time.RFC3339),
-			QuerySnapshot:   query,
-		}, nil
+		return sv.createErrorResult("null_query_validation", "Query cannot be nil", []string{"Query is nil"}, nil), nil
 	}
 
 	// Initialize combined result
 	combinedResult := &interfaces.ValidationResult{
 		IsValid:         true,
-		RuleName:        "comprehensive_safety_validation",
+		RuleName:        "enhanced_comprehensive_validation",
 		Severity:        "info",
 		Message:         "Query validation completed successfully",
 		Details:         make(map[string]interface{}),
@@ -116,96 +113,48 @@ func (sv *SafetyValidator) ValidateQuery(query *types.StructuredQuery) (*interfa
 		QuerySnapshot:   query,
 	}
 
-	// Apply all validation rules
-	ruleResults := make(map[string]*interfaces.ValidationResult)
+	// Phase 1: Schema Validation (highest priority)
+	schemaErr := sv.schemaValidator.ValidateSchema(query)
+	if schemaErr != nil {
+		return sv.convertSchemaErrorToValidationResult(schemaErr, query), nil
+	}
 
-	// Apply whitelist validation
-	if sv.whitelist != nil && sv.whitelist.IsEnabled() {
-		result := sv.whitelist.Validate(query)
-		ruleResults["whitelist"] = result
-		if !result.IsValid {
+	// Phase 2: Basic Safety Rules
+	basicRuleResults := sv.applyBasicRules(query)
+	
+	// Check if any basic rules failed (fail fast for critical errors)
+	for ruleName, result := range basicRuleResults {
+		if !result.IsValid && result.Severity == "critical" {
 			combinedResult.IsValid = false
+			combinedResult.Severity = "critical"
+			combinedResult.Message = fmt.Sprintf("Critical validation failure in %s", ruleName)
 			combinedResult.Errors = append(combinedResult.Errors, result.Errors...)
+			combinedResult.Details["failed_rule"] = ruleName
+			combinedResult.Details["rule_results"] = basicRuleResults
+			return combinedResult, nil
 		}
-		combinedResult.Warnings = append(combinedResult.Warnings, result.Warnings...)
-		combinedResult.Recommendations = append(combinedResult.Recommendations, result.Recommendations...)
 	}
 
-	// Apply sanitization validation
-	if sv.sanitization != nil && sv.sanitization.IsEnabled() {
-		result := sv.sanitization.Validate(query)
-		ruleResults["sanitization"] = result
-		if !result.IsValid {
+	// Phase 3: Advanced Safety Rules via RuleEngine (if basic rules passed)
+	advancedRuleResults := make(map[string]*interfaces.ValidationResult)
+	if sv.ruleEngine != nil {
+		ruleEngineResult, err := sv.ruleEngine.EvaluateRules(query)
+		if err != nil {
 			combinedResult.IsValid = false
-			combinedResult.Errors = append(combinedResult.Errors, result.Errors...)
+			combinedResult.Severity = "critical"
+			combinedResult.Message = fmt.Sprintf("Rule engine evaluation failed: %v", err)
+			combinedResult.Errors = append(combinedResult.Errors, err.Error())
+			return combinedResult, nil
 		}
-		combinedResult.Warnings = append(combinedResult.Warnings, result.Warnings...)
-		combinedResult.Recommendations = append(combinedResult.Recommendations, result.Recommendations...)
-	}
 
-	// Apply timeframe validation
-	if sv.timeframe != nil && sv.timeframe.IsEnabled() {
-		result := sv.timeframe.Validate(query)
-		ruleResults["timeframe"] = result
-		if !result.IsValid {
-			combinedResult.IsValid = false
-			combinedResult.Errors = append(combinedResult.Errors, result.Errors...)
-		}
-		combinedResult.Warnings = append(combinedResult.Warnings, result.Warnings...)
-		combinedResult.Recommendations = append(combinedResult.Recommendations, result.Recommendations...)
-	}
-
-	// Apply patterns validation
-	if sv.patterns != nil && sv.patterns.IsEnabled() {
-		result := sv.patterns.Validate(query)
-		ruleResults["patterns"] = result
-		if !result.IsValid {
-			combinedResult.IsValid = false
-			combinedResult.Errors = append(combinedResult.Errors, result.Errors...)
-		}
-		combinedResult.Warnings = append(combinedResult.Warnings, result.Warnings...)
-		combinedResult.Recommendations = append(combinedResult.Recommendations, result.Recommendations...)
-	}
-
-	// Apply required fields validation
-	if sv.requiredFields != nil && sv.requiredFields.IsEnabled() {
-		result := sv.requiredFields.Validate(query)
-		ruleResults["required_fields"] = result
-		if !result.IsValid {
-			combinedResult.IsValid = false
-			combinedResult.Errors = append(combinedResult.Errors, result.Errors...)
-		}
-		combinedResult.Warnings = append(combinedResult.Warnings, result.Warnings...)
-		combinedResult.Recommendations = append(combinedResult.Recommendations, result.Recommendations...)
-	}
-
-	// Apply additional validation rules
-	for _, rule := range sv.rules {
-		if rule.IsEnabled() {
-			result := rule.Validate(query)
-			ruleResults[rule.GetRuleName()] = result
-			if !result.IsValid {
-				combinedResult.IsValid = false
-				combinedResult.Errors = append(combinedResult.Errors, result.Errors...)
-			}
-			combinedResult.Warnings = append(combinedResult.Warnings, result.Warnings...)
-			combinedResult.Recommendations = append(combinedResult.Recommendations, result.Recommendations...)
+		// Extract individual rule results from the rule engine result
+		if ruleResults, ok := ruleEngineResult.Details["rule_results"].(map[string]*interfaces.ValidationResult); ok {
+			advancedRuleResults = ruleResults
 		}
 	}
 
-	// Update severity based on validation results
-	if !combinedResult.IsValid {
-		combinedResult.Severity = "critical"
-		combinedResult.Message = "Query validation failed"
-	} else if len(combinedResult.Warnings) > 0 {
-		combinedResult.Severity = "warning"
-		combinedResult.Message = "Query validation passed with warnings"
-	}
-
-	// Add rule results to details
-	combinedResult.Details["rule_results"] = ruleResults
-	combinedResult.Details["total_rules_applied"] = len(ruleResults)
-	combinedResult.Details["validation_timestamp"] = combinedResult.Timestamp
+	// Phase 4: Aggregate all results
+	sv.aggregateResults(combinedResult, basicRuleResults, advancedRuleResults)
 
 	return combinedResult, nil
 }
@@ -231,18 +180,27 @@ func (sv *SafetyValidator) GetApplicableRules() []interfaces.ValidationRule {
 		activeRules = append(activeRules, sv.requiredFields)
 	}
 
-	// Add additional rules
+	// Add additional legacy rules
 	for _, rule := range sv.rules {
 		if rule.IsEnabled() {
 			activeRules = append(activeRules, rule)
 		}
 	}
 
+	// Add rules from the rule engine
+	if sv.ruleEngine != nil {
+		for _, rule := range sv.ruleEngine.rules {
+			if rule.IsEnabled() {
+				activeRules = append(activeRules, rule)
+			}
+		}
+	}
+
 	return activeRules
 }
 
-// initializeRules initializes all validation rules from configuration
-func (sv *SafetyValidator) initializeRules() {
+// initializeLegacyRules initializes legacy validation rules from configuration
+func (sv *SafetyValidator) initializeLegacyRules() {
 	// Initialize whitelist rule
 	if len(sv.config.SafetyRules.AllowedLogSources) > 0 ||
 		len(sv.config.SafetyRules.AllowedVerbs) > 0 ||
@@ -274,13 +232,13 @@ func (sv *SafetyValidator) initializeRules() {
 		sv.requiredFields = rules.NewRequiredFieldsRule(sv.config.SafetyRules.RequiredFields)
 	}
 
-	// Initialize additional rules based on configuration
-	sv.initializeAdditionalRules()
+	// Initialize additional legacy rules based on configuration
+	sv.initializeAdditionalLegacyRules()
 }
 
-// initializeAdditionalRules initializes additional validation rules
-func (sv *SafetyValidator) initializeAdditionalRules() {
-	// This method can be extended to add more validation rules
+// initializeAdditionalLegacyRules initializes additional legacy validation rules
+func (sv *SafetyValidator) initializeAdditionalLegacyRules() {
+	// This method can be extended to add more legacy validation rules
 	// based on the configuration or specific requirements
 }
 
@@ -290,11 +248,139 @@ func (sv *SafetyValidator) GetValidationStats() map[string]interface{} {
 
 	activeRules := sv.GetApplicableRules()
 	stats["total_active_rules"] = len(activeRules)
+	stats["schema_validator_enabled"] = sv.schemaValidator != nil
 	stats["whitelist_enabled"] = sv.whitelist != nil && sv.whitelist.IsEnabled()
 	stats["sanitization_enabled"] = sv.sanitization != nil && sv.sanitization.IsEnabled()
 	stats["timeframe_enabled"] = sv.timeframe != nil && sv.timeframe.IsEnabled()
 	stats["patterns_enabled"] = sv.patterns != nil && sv.patterns.IsEnabled()
 	stats["required_fields_enabled"] = sv.requiredFields != nil && sv.requiredFields.IsEnabled()
+	stats["rule_engine_enabled"] = sv.ruleEngine != nil
+
+	// Add rule engine statistics if available
+	if sv.ruleEngine != nil {
+		engineStats := sv.ruleEngine.GetEngineStats()
+		for key, value := range engineStats {
+			stats["engine_"+key] = value
+		}
+	}
 
 	return stats
+}
+
+// createErrorResult creates a standardized error result
+func (sv *SafetyValidator) createErrorResult(ruleName, message string, errors []string, query *types.StructuredQuery) *interfaces.ValidationResult {
+	return &interfaces.ValidationResult{
+		IsValid:         false,
+		RuleName:        ruleName,
+		Severity:        "critical",
+		Message:         message,
+		Details:         map[string]interface{}{
+			"validation_timestamp": time.Now().Format(time.RFC3339),
+			"rule_results":         map[string]*interfaces.ValidationResult{}, // Empty rule results for error cases
+		},
+		Recommendations: []string{"Review and fix the validation errors"},
+		Warnings:        []string{},
+		Errors:          errors,
+		Timestamp:       time.Now().Format(time.RFC3339),
+		QuerySnapshot:   query,
+	}
+}
+
+// convertSchemaErrorToValidationResult converts schema validation errors to ValidationResult
+func (sv *SafetyValidator) convertSchemaErrorToValidationResult(err error, query *types.StructuredQuery) *interfaces.ValidationResult {
+	return &interfaces.ValidationResult{
+		IsValid:         false,
+		RuleName:        "schema_validation",
+		Severity:        "critical",
+		Message:         "Schema validation failed",
+		Details:         map[string]interface{}{
+			"schema_error":         err.Error(),
+			"validation_timestamp": time.Now().Format(time.RFC3339),
+			"rule_results":         map[string]*interfaces.ValidationResult{}, // Empty rule results for schema errors
+		},
+		Recommendations: []string{"Fix schema validation errors", "Ensure all required fields are present and valid"},
+		Warnings:        []string{},
+		Errors:          []string{err.Error()},
+		Timestamp:       time.Now().Format(time.RFC3339),
+		QuerySnapshot:   query,
+	}
+}
+
+// applyBasicRules applies basic safety validation rules
+func (sv *SafetyValidator) applyBasicRules(query *types.StructuredQuery) map[string]*interfaces.ValidationResult {
+	ruleResults := make(map[string]*interfaces.ValidationResult)
+
+	// Apply required fields validation first
+	if sv.requiredFields != nil && sv.requiredFields.IsEnabled() {
+		ruleResults["required_fields"] = sv.requiredFields.Validate(query)
+	}
+
+	// Apply whitelist validation
+	if sv.whitelist != nil && sv.whitelist.IsEnabled() {
+		ruleResults["whitelist"] = sv.whitelist.Validate(query)
+	}
+
+	// Apply sanitization validation
+	if sv.sanitization != nil && sv.sanitization.IsEnabled() {
+		ruleResults["sanitization"] = sv.sanitization.Validate(query)
+	}
+
+	// Apply patterns validation
+	if sv.patterns != nil && sv.patterns.IsEnabled() {
+		ruleResults["patterns"] = sv.patterns.Validate(query)
+	}
+
+	// Apply timeframe validation
+	if sv.timeframe != nil && sv.timeframe.IsEnabled() {
+		ruleResults["timeframe"] = sv.timeframe.Validate(query)
+	}
+
+	// Apply additional basic rules
+	for _, rule := range sv.rules {
+		if rule.IsEnabled() {
+			ruleResults[rule.GetRuleName()] = rule.Validate(query)
+		}
+	}
+
+	return ruleResults
+}
+
+
+// aggregateResults combines results from all validation phases
+func (sv *SafetyValidator) aggregateResults(combinedResult *interfaces.ValidationResult, basicResults, advancedResults map[string]*interfaces.ValidationResult) {
+	allResults := make(map[string]*interfaces.ValidationResult)
+	
+	// Merge basic and advanced results
+	for k, v := range basicResults {
+		allResults[k] = v
+	}
+	for k, v := range advancedResults {
+		allResults[k] = v
+	}
+
+	// Aggregate errors, warnings, and recommendations
+	for _, result := range allResults {
+		if !result.IsValid {
+			combinedResult.IsValid = false
+			combinedResult.Errors = append(combinedResult.Errors, result.Errors...)
+		}
+		combinedResult.Warnings = append(combinedResult.Warnings, result.Warnings...)
+		combinedResult.Recommendations = append(combinedResult.Recommendations, result.Recommendations...)
+	}
+
+	// Update severity and message
+	if !combinedResult.IsValid {
+		combinedResult.Severity = "critical"
+		combinedResult.Message = "Query validation failed"
+	} else if len(combinedResult.Warnings) > 0 {
+		combinedResult.Severity = "warning"
+		combinedResult.Message = "Query validation passed with warnings"
+	}
+
+	// Add detailed results
+	combinedResult.Details["rule_results"] = allResults
+	combinedResult.Details["total_rules_applied"] = len(allResults)
+	combinedResult.Details["basic_rules_count"] = len(basicResults)
+	combinedResult.Details["advanced_rules_count"] = len(advancedResults)
+	combinedResult.Details["validation_timestamp"] = combinedResult.Timestamp
 }

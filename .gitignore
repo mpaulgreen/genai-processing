@@ -32,3 +32,5 @@ go.work
 
 CLAUDE.md
 .DS_Store
+
+inputs/

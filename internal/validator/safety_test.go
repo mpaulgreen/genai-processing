@@ -759,10 +759,14 @@ func TestSafetyValidator_ValidationResult_Structure(t *testing.T) {
 // TestSafetyValidator_CustomConfig tests validator with custom configuration
 func TestSafetyValidator_CustomConfig(t *testing.T) {
 	config := &ValidationConfig{}
-	config.SafetyRules.AllowedLogSources = []string{"test-source"}
+	// Use a valid log source that's also in the schema validator's hardcoded list
+	config.SafetyRules.AllowedLogSources = []string{"kube-apiserver"}
 	config.SafetyRules.AllowedVerbs = []string{"get", "list"}
 	config.SafetyRules.ForbiddenPatterns = []string{"DROP TABLE"}
 	config.SafetyRules.RequiredFields = []string{"log_source"}
+	
+	// Apply defaults to the config like the loader does
+	config.ApplyDefaults()
 	
 	validator := NewSafetyValidatorWithConfig(config)
 	
@@ -774,9 +778,9 @@ func TestSafetyValidator_CustomConfig(t *testing.T) {
 		t.Error("Expected custom config to be used")
 	}
 	
-	// Test validation with custom config
+	// Test validation with custom config (using valid log source)
 	query := &types.StructuredQuery{
-		LogSource: "test-source",
+		LogSource: "kube-apiserver",
 		Verb:      *types.NewStringOrArray("get"),
 	}
 	
