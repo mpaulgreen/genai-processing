@@ -555,9 +555,8 @@ func TestGetDefaultRulesConfig(t *testing.T) {
 		t.Error("Default required fields should be configured")
 	}
 
-	if config.BusinessHours.DefaultTimezone == "" {
-		t.Error("Default timezone should be set")
-	}
+	// Business hours presets now come from configs/rules.yaml (single source of truth)
+	// Empty AllowedPresets in config is expected behavior
 }
 
 func TestContextConfig_Validate(t *testing.T) {

@@ -184,20 +184,8 @@ func (c *ClaudeExtractor) validateQuery(query *types.StructuredQuery) error {
 		return fmt.Errorf("limit must be between 1 and 1000, got %d", query.Limit)
 	}
 
-	// Validate auth decision if specified
-	if query.AuthDecision != "" {
-		validDecisions := []string{"allow", "error", "forbid"}
-		validDecision := false
-		for _, valid := range validDecisions {
-			if query.AuthDecision == valid {
-				validDecision = true
-				break
-			}
-		}
-		if !validDecision {
-			return fmt.Errorf("invalid auth_decision: %s, must be one of %v", query.AuthDecision, validDecisions)
-		}
-	}
+	// Note: auth_decision validation now handled by FieldValuesRule in validator package
+	// This allows configuration-driven validation instead of hardcoded values
 
 	// Validate sort order if specified
 	if query.SortOrder != "" {

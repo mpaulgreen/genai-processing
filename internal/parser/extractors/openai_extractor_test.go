@@ -390,7 +390,7 @@ func TestOpenAIExtractor_ParseResponse_ComplexQueries(t *testing.T) {
 			"type": "multi_namespace_access",
 			"group_by": ["username"],
 			"threshold": 5,
-			"time_window": "short",
+			"time_window": "1_hour",
 			"sort_by": "count",
 			"sort_order": "desc"
 		}
@@ -510,8 +510,8 @@ func TestOpenAIExtractor_ParseResponse_ErrorCases(t *testing.T) {
 		{
 			name:        "invalid auth_decision",
 			content:     `{"log_source": "oauth-server", "auth_decision": "invalid"}`,
-			expectError: true,
-			errorMsg:    "invalid auth_decision",
+			expectError: false, // Auth decision validation moved to FieldValuesRule - extraction should succeed
+			errorMsg:    "",
 		},
 		{
 			name:        "invalid sort_order",

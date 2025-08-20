@@ -602,15 +602,13 @@ func (e *RuleEngine) initializePriorities() {
 		e.priorities = map[string]int{
 			"schema_validation":      100,
 			"required_fields":        90,
-			"whitelist":             80,
-			"sanitization":          70,
-			"patterns":              60,
-			"timeframe":             50,
-			"advanced_analysis":     40,
-			"multi_source":          30,
-			"behavioral_analytics":  20,
-			"compliance":            15,
-			"performance":           10,
+			"sanitization":          80,
+			"patterns":              70,
+			"field_values":          60,
+			"advanced_analysis":     50,
+			"multi_source":          40,
+			"behavioral_analytics":  30,
+			"compliance":            20,
 		}
 	}
 }
@@ -622,7 +620,7 @@ func (e *RuleEngine) initializeRules() {
 	e.RegisterRule("multi_source", rules.NewMultiSourceRule(e.config.GetConfigSection("multi_source")))
 	e.RegisterRule("behavioral_analytics", rules.NewBehavioralAnalyticsRule(e.config.GetConfigSection("behavioral_analytics")))
 	e.RegisterRule("compliance", rules.NewComplianceRule(e.config.GetConfigSection("compliance_framework")))
-	e.RegisterRule("performance", rules.NewPerformanceRule(e.config.GetConfigSection("performance_limits")))
+	e.RegisterRule("field_values", rules.NewFieldValuesRule(nil))
 
 	// Set up default rule conditions
 	e.setDefaultConditions()

@@ -232,13 +232,7 @@ func (r *AdvancedAnalysisRule) validateTimeWindows(analysis *types.AdvancedAnaly
 		return // Optional field
 	}
 
-	allowedTimeWindows := []string{
-		"1_minute", "5_minutes", "10_minutes", "15_minutes", "30_minutes",
-		"1_hour", "2_hours", "4_hours", "6_hours", "8_hours", "12_hours", "24_hours",
-		"48_hours", "72_hours", "7_days", "14_days", "30_days",
-		"short", "medium", "long", // Legacy support
-	}
-
+	allowedTimeWindows := r.getAllowedTimeWindows()
 	if !r.isValueInSlice(analysis.TimeWindow, allowedTimeWindows) {
 		result.IsValid = false
 		result.Errors = append(result.Errors,
@@ -251,7 +245,7 @@ func (r *AdvancedAnalysisRule) validateTimeWindows(analysis *types.AdvancedAnaly
 func (r *AdvancedAnalysisRule) validateGroupingAndSorting(analysis *types.AdvancedAnalysisConfig, result *interfaces.ValidationResult) {
 	// Validate sort by field
 	if analysis.SortBy != "" {
-		allowedSortFields := []string{"timestamp", "user", "resource", "count", "namespace"}
+		allowedSortFields := r.getAllowedSortFields()
 		if !r.isValueInSlice(analysis.SortBy, allowedSortFields) {
 			result.IsValid = false
 			result.Errors = append(result.Errors,
@@ -262,7 +256,7 @@ func (r *AdvancedAnalysisRule) validateGroupingAndSorting(analysis *types.Advanc
 
 	// Validate sort order
 	if analysis.SortOrder != "" {
-		allowedSortOrders := []string{"asc", "desc"}
+		allowedSortOrders := r.getAllowedSortOrders()
 		if !r.isValueInSlice(analysis.SortOrder, allowedSortOrders) {
 			result.IsValid = false
 			result.Errors = append(result.Errors,
@@ -307,64 +301,9 @@ func (r *AdvancedAnalysisRule) getAllowedAnalysisTypes() []string {
 }
 
 func (r *AdvancedAnalysisRule) getDefaultAnalysisTypes() []string {
-	return []string{
-		"multi_namespace_access",
-		"excessive_reads",
-		"privilege_escalation",
-		"anomaly_detection",
-		"correlation",
-		"apt_reconnaissance_detection",
-		"lateral_movement_detection",
-		"container_security_investigation",
-		"build_deployment_security_investigation",
-		"webhook_bypass_investigation",
-		"certificate_secret_forensics",
-		"cross_namespace_security_investigation",
-		"user_session_pattern_analysis",
-		"user_behavior_anomaly_detection",
-		"administrative_workflow_tracking",
-		"sensitive_data_access_tracking",
-		"privilege_management_tracking",
-		"oauth_client_access_monitoring",
-		"user_command_execution_tracking",
-		"application_management_tracking",
-		"storage_access_tracking",
-		"traffic_management_tracking",
-		"brute_force_detection",
-		"password_spraying_detection",
-		"oauth_api_auth_failure_analysis",
-		"k8s_api_auth_failure_tracking",
-		"user_agent_pattern_analysis",
-		"geographic_distribution_analysis",
-		"system_account_attack_detection",
-		"after_hours_attack_detection",
-		"token_abuse_detection",
-		"reconnaissance_detection",
-		"maintenance_window_analysis",
-		"peak_hours_resource_spike_analysis",
-		"shift_change_auth_clustering",
-		"weekend_holiday_analysis",
-		"off_hours_oauth_compliance_monitoring",
-		"rapid_operation_automation_detection",
-		"periodic_build_deployment_pattern_analysis",
-		"temporal_auth_resource_correlation",
-		"maintenance_window_node_audit_monitoring",
-		"service_account_temporal_pattern_analysis",
-		"rbac_violation_privilege_escalation_analysis",
-		"cluster_admin_privilege_monitoring",
-		"service_account_permission_abuse_detection",
-		"oauth_client_permission_scope_investigation",
-		"namespace_permission_boundary_analysis",
-		"custom_resource_permission_analysis",
-		"security_context_constraint_violation_monitoring",
-		"privilege_escalation_rolebinding_analysis",
-		"impersonation_identity_spoofing_investigation",
-		"admission_controller_authorization_analysis",
-		"oauth_token_manipulation_investigation",
-		"cross_source_correlation",
-		"timeline_reconstruction",
-		"evidence_correlation",
-	}
+	// Return empty list to force dependency on configuration file
+	// All analysis types are now defined in configs/rules.yaml as single source of truth
+	return []string{}
 }
 
 func (r *AdvancedAnalysisRule) getMaxThresholdValue() int {
@@ -392,6 +331,82 @@ func (r *AdvancedAnalysisRule) getMaxGroupByFields() int {
 		}
 	}
 	return 5 // Default
+}
+
+func (r *AdvancedAnalysisRule) getAllowedTimeWindows() []string {
+	if r.config == nil {
+		return r.getDefaultTimeWindows()
+	}
+
+	if allowedWindows, ok := r.config["allowed_time_windows"].([]interface{}); ok {
+		windows := make([]string, len(allowedWindows))
+		for i, w := range allowedWindows {
+			if str, ok := w.(string); ok {
+				windows[i] = str
+			}
+		}
+		return windows
+	}
+
+	return r.getDefaultTimeWindows()
+}
+
+func (r *AdvancedAnalysisRule) getDefaultTimeWindows() []string {
+	// Return empty list to force dependency on configuration file
+	// All time windows are now defined in configs/rules.yaml as single source of truth
+	return []string{}
+}
+
+// getAllowedSortFields returns allowed sort fields from configuration
+func (r *AdvancedAnalysisRule) getAllowedSortFields() []string {
+	if r.config == nil {
+		return r.getDefaultSortFields()
+	}
+	if sortConfig, ok := r.config["sort_configuration"].(map[string]interface{}); ok {
+		if allowedFields, ok := sortConfig["allowed_sort_fields"].([]interface{}); ok {
+			fields := make([]string, len(allowedFields))
+			for i, f := range allowedFields {
+				if str, ok := f.(string); ok {
+					fields[i] = str
+				}
+			}
+			return fields
+		}
+	}
+	return r.getDefaultSortFields()
+}
+
+// getAllowedSortOrders returns allowed sort orders from configuration
+func (r *AdvancedAnalysisRule) getAllowedSortOrders() []string {
+	if r.config == nil {
+		return r.getDefaultSortOrders()
+	}
+	if sortConfig, ok := r.config["sort_configuration"].(map[string]interface{}); ok {
+		if allowedOrders, ok := sortConfig["allowed_sort_orders"].([]interface{}); ok {
+			orders := make([]string, len(allowedOrders))
+			for i, o := range allowedOrders {
+				if str, ok := o.(string); ok {
+					orders[i] = str
+				}
+			}
+			return orders
+		}
+	}
+	return r.getDefaultSortOrders()
+}
+
+// getDefaultSortFields returns default sort fields when no configuration is available
+func (r *AdvancedAnalysisRule) getDefaultSortFields() []string {
+	// Return empty list to force dependency on configuration file
+	// All sort fields are now defined in configs/rules.yaml as single source of truth
+	return []string{}
+}
+
+// getDefaultSortOrders returns default sort orders when no configuration is available
+func (r *AdvancedAnalysisRule) getDefaultSortOrders() []string {
+	// Return empty list to force dependency on configuration file
+	// All sort orders are now defined in configs/rules.yaml as single source of truth
+	return []string{}
 }
 
 // Utility methods

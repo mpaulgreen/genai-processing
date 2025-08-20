@@ -143,13 +143,10 @@ type QueryLimits struct {
 	MaxSourceIPArraySize      int `yaml:"max_source_ip_array_size" validate:"min=1"`
 }
 
-// BusinessHours defines business hours configuration
+// BusinessHours defines simple business hours configuration
 type BusinessHours struct {
-	DefaultStartHour int    `yaml:"default_start_hour" validate:"min=0,max=23"`
-	DefaultEndHour   int    `yaml:"default_end_hour" validate:"min=0,max=23"`
-	DefaultTimezone  string `yaml:"default_timezone" validate:"required"`
-	MaxHourValue     int    `yaml:"max_hour_value" validate:"min=0,max=23"`
-	MinHourValue     int    `yaml:"min_hour_value" validate:"min=0,max=23"`
+	// Simple preset options: "business_hours", "outside_business_hours", "weekend", "all_hours"
+	AllowedPresets []string `yaml:"allowed_presets" validate:"required"`
 }
 
 // AnalysisLimits defines limits for analysis configuration
@@ -162,11 +159,10 @@ type AnalysisLimits struct {
 	AllowedSortOrders      []string `yaml:"allowed_sort_orders" validate:"required"`
 }
 
-// ResponseStatus defines allowed response status codes
+// ResponseStatus defines simple response status validation  
 type ResponseStatus struct {
+	// Standard HTTP status codes - no complex validation needed
 	AllowedStatusCodes []string `yaml:"allowed_status_codes" validate:"required"`
-	MinStatusCode      int      `yaml:"min_status_code" validate:"min=100,max=599"`
-	MaxStatusCode      int      `yaml:"max_status_code" validate:"min=100,max=599"`
 }
 
 // AuthDecisions defines allowed authentication decisions
@@ -650,24 +646,12 @@ func (q *QueryLimits) Validate() ValidationResult {
 	return result
 }
 
-// Validate validates the BusinessHours
+// Validate validates the BusinessHours  
 func (b *BusinessHours) Validate() ValidationResult {
 	result := ValidationResult{Valid: true}
 
-	if b.DefaultStartHour < 0 || b.DefaultStartHour > 23 {
-		result.Valid = false
-		result.Errors = append(result.Errors, "default_start_hour must be between 0 and 23")
-	}
-
-	if b.DefaultEndHour < 0 || b.DefaultEndHour > 23 {
-		result.Valid = false
-		result.Errors = append(result.Errors, "default_end_hour must be between 0 and 23")
-	}
-
-	if b.DefaultTimezone == "" {
-		result.Valid = false
-		result.Errors = append(result.Errors, "default_timezone is required")
-	}
+	// Business hours presets validation removed - they are now defined in configs/rules.yaml as single source of truth
+	// Empty AllowedPresets is valid since configurations come from rules.yaml
 
 	return result
 }
@@ -691,10 +675,7 @@ func (a *AnalysisLimits) Validate() ValidationResult {
 		result.Errors = append(result.Errors, "min_threshold_value cannot be greater than max_threshold_value")
 	}
 
-	if len(a.AllowedAnalysisTypes) == 0 {
-		result.Valid = false
-		result.Errors = append(result.Errors, "at least one allowed analysis type must be specified")
-	}
+	// Analysis types validation removed - they are now defined in configs/rules.yaml as single source of truth
 
 	return result
 }
@@ -703,25 +684,8 @@ func (a *AnalysisLimits) Validate() ValidationResult {
 func (r *ResponseStatus) Validate() ValidationResult {
 	result := ValidationResult{Valid: true}
 
-	if len(r.AllowedStatusCodes) == 0 {
-		result.Valid = false
-		result.Errors = append(result.Errors, "at least one allowed status code must be specified")
-	}
-
-	if r.MinStatusCode < 100 || r.MinStatusCode > 599 {
-		result.Valid = false
-		result.Errors = append(result.Errors, "min_status_code must be between 100 and 599")
-	}
-
-	if r.MaxStatusCode < 100 || r.MaxStatusCode > 599 {
-		result.Valid = false
-		result.Errors = append(result.Errors, "max_status_code must be between 100 and 599")
-	}
-
-	if r.MinStatusCode > r.MaxStatusCode {
-		result.Valid = false
-		result.Errors = append(result.Errors, "min_status_code cannot be greater than max_status_code")
-	}
+	// Response status codes validation removed - they are now defined in configs/rules.yaml as single source of truth
+	// Empty AllowedStatusCodes is valid since configurations come from rules.yaml
 
 	return result
 }
@@ -730,10 +694,8 @@ func (r *ResponseStatus) Validate() ValidationResult {
 func (a *AuthDecisions) Validate() ValidationResult {
 	result := ValidationResult{Valid: true}
 
-	if len(a.AllowedDecisions) == 0 {
-		result.Valid = false
-		result.Errors = append(result.Errors, "at least one allowed auth decision must be specified")
-	}
+	// Auth decisions validation removed - they are now defined in configs/rules.yaml as single source of truth
+	// Empty AllowedDecisions is valid since configurations come from rules.yaml
 
 	return result
 }
@@ -1001,32 +963,32 @@ func GetDefaultRulesConfig() *RulesConfig {
 			MaxSourceIPArraySize:       20,
 		},
 		BusinessHours: BusinessHours{
-			DefaultStartHour: 9,
-			DefaultEndHour:   17,
-			DefaultTimezone:  "UTC",
-			MaxHourValue:     23,
-			MinHourValue:     0,
+			// Empty - business hours presets now defined in configs/rules.yaml as single source of truth
+			AllowedPresets: []string{},
 		},
 		AnalysisLimits: AnalysisLimits{
 			MaxThresholdValue: 10000,
 			MinThresholdValue: 1,
 			AllowedAnalysisTypes: []string{
-				"multi_namespace_access", "excessive_reads", "privilege_escalation",
-				"anomaly_detection", "correlation",
+				// Empty - analysis types now defined in configs/rules.yaml as single source of truth
 			},
-			AllowedTimeWindows: []string{"short", "medium", "long"},
-			AllowedSortFields:  []string{"timestamp", "user", "resource", "count"},
-			AllowedSortOrders:  []string{"asc", "desc"},
+			AllowedTimeWindows: []string{
+				// Empty - time windows now defined in configs/rules.yaml as single source of truth
+			},
+			AllowedSortFields: []string{
+				// Empty - sort fields now defined in configs/rules.yaml as single source of truth
+			},
+			AllowedSortOrders: []string{
+				// Empty - sort orders now defined in configs/rules.yaml as single source of truth
+			},
 		},
 		ResponseStatus: ResponseStatus{
-			AllowedStatusCodes: []string{
-				"200", "201", "204", "400", "401", "403", "404", "409", "422", "500", "502", "503", "504",
-			},
-			MinStatusCode: 100,
-			MaxStatusCode: 599,
+			// Empty - response status codes now defined in configs/rules.yaml as single source of truth
+			AllowedStatusCodes: []string{},
 		},
 		AuthDecisions: AuthDecisions{
-			AllowedDecisions: []string{"allow", "error", "forbid"},
+			// Empty - auth decisions now defined in configs/rules.yaml as single source of truth
+			AllowedDecisions: []string{},
 		},
 		PromptValidation: PromptValidation{
 			MaxInputLength:  1000,

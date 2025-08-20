@@ -81,7 +81,6 @@ type ValidationConfig struct {
 	SecurityPatterns      map[string]interface{} `yaml:"security_patterns"`
 	TimeBasedSecurity     map[string]interface{} `yaml:"time_based_security"`
 	OpenShiftSecurity     map[string]interface{} `yaml:"openshift_security"`
-	PerformanceLimits     map[string]interface{} `yaml:"performance_limits"`
 	PromptValidation      map[string]interface{} `yaml:"prompt_validation"`
 	
 	// Rule engine configuration
@@ -128,15 +127,13 @@ func GetRuleEngineDefaults() RuleEngineConfig {
 		RulePriorities:          map[string]int{
 			"schema_validation":    100,
 			"required_fields":      90,
-			"whitelist":           80,
-			"sanitization":        70,
-			"patterns":            60,
-			"timeframe":           50,
-			"advanced_analysis":   40,
-			"multi_source":        30,
-			"behavioral_analytics": 20,
-			"compliance":          15,
-			"performance":         10,
+			"sanitization":        80,
+			"patterns":            70,
+			"field_values":        60,
+			"advanced_analysis":   50,
+			"multi_source":        40,
+			"behavioral_analytics": 30,
+			"compliance":          20,
 		},
 		EnableRuleCaching: true,
 		CacheTTLSeconds:   300, // 5 minutes
@@ -161,18 +158,8 @@ func (config *ValidationConfig) ApplyDefaults() {
 	}
 	
 	// Apply other defaults as needed
-	if config.PerformanceLimits == nil {
-		config.PerformanceLimits = map[string]interface{}{
-			"max_query_complexity_score": 100,
-			"max_concurrent_sources":     5,
-			"max_correlation_fields":     10,
-			"max_behavioral_features":    50,
-			"max_memory_usage_mb":        1024,
-			"max_cpu_usage_percent":      50,
-			"max_execution_time_seconds": 300,
-		}
-	}
 }
+
 
 // GetConfigSection safely retrieves a configuration section
 func (config *ValidationConfig) GetConfigSection(sectionName string) map[string]interface{} {
@@ -201,8 +188,6 @@ func (config *ValidationConfig) GetConfigSection(sectionName string) map[string]
 		return config.TimeBasedSecurity
 	case "openshift_security":
 		return config.OpenShiftSecurity
-	case "performance_limits":
-		return config.PerformanceLimits
 	case "prompt_validation":
 		return config.PromptValidation
 	default:

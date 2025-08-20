@@ -17,8 +17,12 @@ func TestBehavioralAnalyticsRule_Validate(t *testing.T) {
 		expectedWarnings int
 	}{
 		{
-			name:   "Valid behavioral analytics configuration",
-			config: nil,
+			name: "Valid behavioral analytics configuration",
+			config: map[string]interface{}{
+				"allowed_baseline_windows": []interface{}{
+					"7_days", "14_days", "30_days", "60_days", "90_days",
+				},
+			},
 			query: &types.StructuredQuery{
 				LogSource: "kube-apiserver",
 				BehavioralAnalysis: &types.BehavioralAnalysisConfig{
@@ -319,6 +323,9 @@ func TestBehavioralAnalyticsRule_Validate(t *testing.T) {
 		{
 			name: "Baseline window too short",
 			config: map[string]interface{}{
+				"allowed_baseline_windows": []interface{}{
+					"7_days", "14_days", "30_days", "60_days", "90_days",
+				},
 				"baseline_window_limits": map[string]interface{}{
 					"min_baseline_days": 14,
 					"max_baseline_days": 90,
@@ -527,10 +534,10 @@ func TestBehavioralAnalyticsRule_ConfigDefaults(t *testing.T) {
 		}
 	}
 
-	// Test default baseline windows
+	// Test default baseline windows (should be empty to force config dependency)
 	windows := rule.getAllowedBaselineWindows()
-	if len(windows) == 0 {
-		t.Error("Default baseline windows should not be empty")
+	if len(windows) != 0 {
+		t.Error("Default baseline windows should be empty to force dependency on configuration file")
 	}
 
 	// Test default learning periods
@@ -622,6 +629,9 @@ func TestBehavioralAnalyticsRule_CustomConfig(t *testing.T) {
 		"allowed_risk_factors": []interface{}{
 			"custom_factor_1",
 			"custom_factor_2",
+		},
+		"allowed_baseline_windows": []interface{}{
+			"7_days", "14_days", "30_days", "60_days", "90_days",
 		},
 		"max_risk_factors": 5,
 		"baseline_window_limits": map[string]interface{}{

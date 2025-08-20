@@ -1,230 +1,112 @@
-# Safety Validation Rules Configuration
-# This file defines all validation rules for OpenShift audit query safety
+# Enhanced Validation Rules Configuration (Unit 3)
+# This file defines comprehensive validation rules for OpenShift audit query safety and advanced analysis
+# Includes schema validation, rule engine configuration, and advanced security monitoring rules
 
-safety_rules:
-  # Allowed log sources for audit queries
-  allowed_log_sources:
-    - "kube-apiserver"
-    - "openshift-apiserver"
-    - "oauth-server"
-    - "oauth-apiserver"
-    - "node-auditd"
-  
-  # Allowed HTTP verbs for audit queries
-  allowed_verbs:
-    - "get"
-    - "list"
-    - "create"
-    - "update"
-    - "patch"
-    - "delete"
-    - "watch"
-    - "connect"
-    - "bind"
-    - "impersonate"
-    - "proxy"
-  
-  # Allowed Kubernetes resources for audit queries
-  allowed_resources:
-    - "pods"
-    - "services"
-    - "deployments"
-    - "configmaps"
-    - "secrets"
-    - "namespaces"
-    - "serviceaccounts"
-    - "roles"
-    - "rolebindings"
-    - "clusterroles"
-    - "clusterrolebindings"
-    - "customresourcedefinitions"
-    - "persistentvolumeclaims"
-    - "persistentvolumes"
-    - "networkpolicies"
-    - "events"
-    - "nodes"
-    - "replicasets"
-    - "statefulsets"
-    - "daemonsets"
-    - "ingresses"
-    - "routes"
-    - "builds"
-    - "buildconfigs"
-    - "imagestreams"
-    - "imagestreamtags"
-    - "projects"
-    - "users"
-    - "groups"
-    - "oauthclients"
-    - "oauthaccesstokens"
-    - "oauthauthorizetokens"
-    - "oauthclientauthorizations"
-    - "securitycontextconstraints"
-    - "certificatesigningrequests"
-    - "certificates"
-    - "deploymentconfigs"
-    - "replicationcontrollers"
-    - "templates"
-    - "processedtemplates"
-    - "localresourceaccessreviews"
-    - "localsubjectaccessreviews"
-    - "resourceaccessreviews"
-    - "subjectaccessreviews"
-    - "selfsubjectaccessreviews"
-    - "selfsubjectrulesreviews"
-    - "tokenreviews"
-  
-  # Forbidden patterns that indicate potential security issues
-  forbidden_patterns:
-    - "rm -rf"
-    - "delete --all"
-    - "delete --force"
-    - "system:admin"
-    - "system:masters"
-    - "cluster-admin"
-    - "drop database"
-    - "format c:"
-    - "shutdown"
-    - "reboot"
-    - "kill"
-    - "terminate"
-    # OpenShift-specific security patterns
-    - "privileged: true"
-    - "hostNetwork: true"
-    - "hostPID: true"
-    - "hostIPC: true"
-    - "allowPrivilegeEscalation: true"
-    - "runAsUser: 0"
-    - "runAsGroup: 0"
-    - "fsGroup: 0"
-    - "supplementalGroups: 0"
-    # Dangerous container operations
-    - "--privileged"
-    - "--cap-add=ALL"
-    - "--cap-add=SYS_ADMIN"
-    - "--security-opt seccomp=unconfined"
-    - "--security-opt apparmor=unconfined"
-    # Dangerous OpenShift commands
-    - "oc adm policy add-scc-to-user privileged"
-    - "oc adm policy add-cluster-role-to-user cluster-admin"
-    - "oc delete project --all"
-    - "oc patch scc privileged"
-    # Dangerous audit log manipulation
-    - "/var/log/audit"
-    - "auditctl"
-    - "audit.log"
-    # Credential theft patterns
-    - "/var/lib/kubelet/pki"
-    - "/etc/kubernetes/pki"
-    - "service-account-token"
-    - "bearer token"
-  
-  # Timeframe limits for audit queries
-  timeframe_limits:
-    max_days_back: 90
-    default_limit: 20
-    max_limit: 1000
-    min_limit: 1
-    
-    # Allowed timeframe values
-    allowed_timeframes:
-      - "today"
-      - "yesterday"
-      - "1_hour_ago"
-      - "2_hours_ago"
-      - "3_hours_ago"
-      - "6_hours_ago"
-      - "12_hours_ago"
-      - "1_day_ago"
-      - "2_days_ago"
-      - "3_days_ago"
-      - "7_days_ago"
-      - "14_days_ago"
-      - "30_days_ago"
-      - "60_days_ago"
-      - "90_days_ago"
-  
-  # Required fields for validation
-  required_fields:
-    - "log_source"
+# Schema Validation Configuration
+schema_validation:
+  enabled: true
+  strict_mode: true
 
-# Input sanitization rules
-sanitization:
-  # Maximum length limits
-  max_query_length: 10000
-  max_pattern_length: 500
-  max_user_pattern_length: 200
-  max_namespace_pattern_length: 200
-  max_resource_pattern_length: 200
-  
-  # Regex patterns for validation
-  valid_regex_pattern: "^[a-zA-Z0-9\\-_\\*\\.\\?\\+\\[\\]\\{\\}\\(\\)\\|\\\\/\\s]+$"
-  valid_ip_pattern: "^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$"
-  valid_namespace_pattern: "^[a-z0-9]([a-z0-9\\-]*[a-z0-9])?$"
-  valid_resource_pattern: "^[a-z]([a-z0-9\\-]*[a-z0-9])?$"
-  
-  # Forbidden characters in patterns
-  forbidden_chars:
-    - "<"
-    - ">"
-    - "&"
-    - "\""
-    - "'"
-    - "`"
-    - "|"
-    - ";"
-    - "$"
-    - "!"
-    - "@"
-    - "#"
-    - "%"
-    - "^"
-    - "="
-    - "~"
+# Rule Engine Configuration
+rule_engine:
+  parallel_execution: true
+  worker_pool_size: 4
+  rule_timeout_seconds: 30
+  dependency_resolution: true
 
-# Query limits and constraints
-query_limits:
-  max_exclude_users: 50
-  max_exclude_resources: 50
-  max_group_by_fields: 5
-  max_sort_fields: 3
-  
-  # Maximum number of items in arrays
-  max_verb_array_size: 10
-  max_resource_array_size: 20
-  max_namespace_array_size: 50
-  max_user_array_size: 100
-  max_response_status_array_size: 10
-  max_source_ip_array_size: 20
-
-# Business hours configuration
-business_hours:
-  default_start_hour: 9
-  default_end_hour: 17
-  default_timezone: "UTC"
-  max_hour_value: 23
-  min_hour_value: 0
-
-# Analysis configuration limits
-analysis_limits:
-  max_threshold_value: 10000
-  min_threshold_value: 1
+# Advanced Analysis Rules
+advanced_analysis:
+  enabled: true
   allowed_analysis_types:
-    # Basic analysis types
+    # Core analysis types
     - "multi_namespace_access"
     - "excessive_reads"
     - "privilege_escalation"
     - "anomaly_detection"
     - "correlation"
-    # Advanced threat hunting
+    - "behavioral_analysis"
+    - "statistical_analysis"
+    
+    # Advanced threat hunting & APT detection
     - "apt_reconnaissance_detection"
+    - "c2_communication_detection"
     - "lateral_movement_detection"
-    - "container_security_investigation"
-    - "build_deployment_security_investigation"
-    - "webhook_bypass_investigation"
-    - "certificate_secret_forensics"
-    - "cross_namespace_security_investigation"
-    # Behavioral analytics
+    - "data_exfiltration_detection"
+    - "living_off_the_land_detection"
+    - "supply_chain_attack_detection"
+    - "persistence_mechanism_detection"
+    - "defense_evasion_detection"
+    - "credential_harvesting_detection"
+    - "impact_destruction_detection"
+    
+    # Behavioral analytics & machine learning
+    - "statistical_user_behavior_analysis"
+    - "time_series_anomaly_detection"
+    - "ml_feature_vector_generation"
+    - "percentile_based_anomaly_detection"
+    - "graph_based_network_analysis"
+    - "behavioral_cohort_clustering"
+    - "seasonal_cyclic_pattern_detection"
+    - "predictive_resource_access_modeling"
+    - "multi_dimensional_behavioral_risk_profiling"
+    - "ensemble_orchestration_anomaly_detection"
+    
+    # Multi-source intelligence & correlation
+    - "multi_source_credential_compromise_correlation"
+    - "supply_chain_multi_source_correlation"
+    - "multi_source_timeline_reconstruction"
+    - "account_takeover_multi_source_detection"
+    - "image_stream_deployment_compliance_correlation"
+    - "multi_source_failure_pattern_investigation"
+    - "node_container_orchestration_correlation"
+    - "cross_platform_identity_provider_correlation"
+    - "security_policy_access_pattern_correlation"
+    - "comprehensive_incident_reconstruction"
+    
+    # Compliance & governance automation
+    - "sox_compliance_privileged_access_audit"
+    - "pci_dss_compliance_monitoring"
+    - "gdpr_data_processing_audit"
+    - "hipaa_phi_compliance_audit"
+    - "regulatory_compliance_dashboard"
+    - "data_retention_compliance_automation"
+    - "segregation_of_duties_violation_monitoring"
+    - "sox_404_financial_controls_tracking"
+    - "automated_compliance_reporting_dashboard"
+    - "data_classification_compliance_validation"
+    
+    # Incident response & digital forensics
+    - "comprehensive_incident_correlation"
+    - "container_breakout_digital_forensics"
+    - "security_incident_attribution_analysis"
+    - "digital_evidence_collection_analysis"
+    - "attack_kill_chain_reconstruction"
+    - "network_ioc_service_mesh_analysis"
+    - "automated_incident_response_orchestration"
+    - "memory_forensics_container_runtime_analysis"
+    - "comprehensive_incident_documentation"
+    - "post_incident_learning_analysis"
+    
+    # Risk assessment & security metrics
+    - "comprehensive_risk_score_calculation"
+    - "security_posture_dashboard_generation"
+    - "security_control_effectiveness_analysis"
+    - "vulnerability_assessment_correlation"
+    - "security_maturity_index_calculation"
+    - "executive_security_scorecard_generation"
+    - "security_control_gap_analysis"
+    - "predictive_risk_modeling"
+    - "comprehensive_security_program_assessment"
+    - "comprehensive_security_analytics_report"
+    
+    # Intermediate query patterns
+    - "rapid_create_delete_pattern"
+    - "service_account_ip_analysis"
+    - "system_file_access_monitoring"
+    - "bulk_deletion_detection"
+    - "impersonation_detection"
+    - "multi_namespace_coordination"
+    - "oauth_token_security_analysis"
     - "user_session_pattern_analysis"
     - "user_behavior_anomaly_detection"
     - "administrative_workflow_tracking"
@@ -235,7 +117,6 @@ analysis_limits:
     - "application_management_tracking"
     - "storage_access_tracking"
     - "traffic_management_tracking"
-    # Authentication security
     - "brute_force_detection"
     - "password_spraying_detection"
     - "oauth_api_auth_failure_analysis"
@@ -246,7 +127,15 @@ analysis_limits:
     - "after_hours_attack_detection"
     - "token_abuse_detection"
     - "reconnaissance_detection"
-    # Time-based analysis
+    - "container_security_investigation"
+    - "oauth_token_manipulation_investigation"
+    - "privilege_escalation_chain_detection"
+    - "suspicious_filesystem_investigation"
+    - "security_context_escalation_investigation"
+    - "build_deployment_security_investigation"
+    - "webhook_bypass_investigation"
+    - "certificate_secret_forensics"
+    - "cross_namespace_security_investigation"
     - "maintenance_window_analysis"
     - "peak_hours_resource_spike_analysis"
     - "shift_change_auth_clustering"
@@ -257,7 +146,6 @@ analysis_limits:
     - "temporal_auth_resource_correlation"
     - "maintenance_window_node_audit_monitoring"
     - "service_account_temporal_pattern_analysis"
-    # Permission-based analysis
     - "rbac_violation_privilege_escalation_analysis"
     - "cluster_admin_privilege_monitoring"
     - "service_account_permission_abuse_detection"
@@ -268,15 +156,23 @@ analysis_limits:
     - "privilege_escalation_rolebinding_analysis"
     - "impersonation_identity_spoofing_investigation"
     - "admission_controller_authorization_analysis"
-    # Multi-source intelligence
-    - "oauth_token_manipulation_investigation"
     - "cross_source_correlation"
     - "timeline_reconstruction"
     - "evidence_correlation"
-  
+  kill_chain_phases:
+    - "reconnaissance"
+    - "weaponization" 
+    - "delivery"
+    - "exploitation"
+  max_group_by_fields: 5
+
+# Time Windows Configuration (Single Source of Truth)
+time_windows:
+  # Comprehensive time windows consolidating all actual usage from test queries
   allowed_time_windows:
+    # Short durations (analysis/correlation)
     - "1_minute"
-    - "5_minutes"
+    - "5_minutes" 
     - "10_minutes"
     - "15_minutes"
     - "30_minutes"
@@ -287,28 +183,83 @@ analysis_limits:
     - "8_hours"
     - "12_hours"
     - "24_hours"
+    
+    # Extended durations (baseline/historical analysis)
     - "48_hours"
     - "72_hours"
     - "7_days"
     - "14_days"
     - "30_days"
-    # Legacy support
-    - "short"
-    - "medium"
-    - "long"
+    - "168_hours"  # 7 days in hours format
   
+  # Specific correlation windows for multi-source analysis
+  allowed_correlation_windows:
+    - "1_minute"
+    - "5_minutes"
+    - "15_minutes"
+    - "30_minutes"
+    - "1_hour"
+    - "4_hours"
+    - "24_hours"
+  
+  # Baseline windows for behavioral analysis
+  allowed_baseline_windows:
+    - "7_days"
+    - "14_days"
+    - "30_days"
+    - "60_days"
+    - "90_days"
+
+# Behavioral Analytics Rules
+behavioral_analytics:
+  enabled: true
+  allowed_risk_factors:
+    - "privilege_level"
+    - "resource_sensitivity"
+    - "timing_anomaly"
+    - "access_pattern"
+  max_risk_factors: 10
+  baseline_window_limits:
+    min_baseline_days: 7
+    max_baseline_days: 90
+  anomaly_threshold_limits:
+    min: 0.1
+    max: 10.0
+
+# Sort Configuration (Single Source of Truth)
+sort_configuration:
   allowed_sort_fields:
     - "timestamp"
-    - "user"
+    - "username"
     - "resource"
+    - "verb"
     - "count"
-  
+    - "risk_score"
+    - "frequency"
+    - "severity"
+    - "namespace"
+    - "auth_decision"
+    - "response_code"
+    - "source_ip"
+    - "user_agent"
+    - "request_uri"
+    - "object_name"
+    - "audit_id"
+    - "stage"
   allowed_sort_orders:
     - "asc"
     - "desc"
 
-# Response status validation
-response_status:
+# Business Hours Configuration (Single Source of Truth)
+business_hours_configuration:
+  allowed_presets:
+    - "business_hours"
+    - "outside_business_hours"
+    - "weekend"
+    - "all_hours"
+
+# Response Status Configuration (Single Source of Truth)
+response_status_configuration:
   allowed_status_codes:
     - "200"
     - "201"
@@ -323,245 +274,134 @@ response_status:
     - "502"
     - "503"
     - "504"
-  
-  # Status code ranges
-  min_status_code: 100
-  max_status_code: 599
 
-# Authentication decision validation
-auth_decisions:
+# Auth Decisions Configuration (Single Source of Truth)
+auth_decisions_configuration:
   allowed_decisions:
     - "allow"
     - "error"
     - "forbid"
 
-# Multi-source correlation rules
-multi_source:
-  # Maximum number of sources that can be correlated
-  max_sources: 5
-  
-  # Allowed correlation windows
-  allowed_correlation_windows:
-    - "1_minute"
-    - "5_minutes"
-    - "10_minutes"
-    - "15_minutes"
-    - "30_minutes"
-    - "1_hour"
-    - "2_hours"
-    - "4_hours"
-    - "6_hours"
-    - "12_hours"
-    - "24_hours"
-  
-  # Valid correlation fields
-  allowed_correlation_fields:
-    - "user"
-    - "source_ip"
-    - "user_agent"
-    - "session_id"
-    - "request_id"
-    - "timestamp"
-    - "namespace"
-    - "resource"
-    - "verb"
-    - "response_status"
-  
-  # Maximum correlation complexity score
-  max_correlation_complexity: 100
-
-# Compliance framework validation
-compliance_framework:
-  # Supported compliance standards
+# Compliance Rules
+compliance:
+  enabled: true
   allowed_standards:
     - "SOX"
     - "PCI-DSS"
     - "GDPR"
     - "HIPAA"
     - "ISO27001"
-    - "NIST"
-    - "CIS"
-    - "FedRAMP"
-  
-  # Standard control mappings
-  allowed_controls:
-    - "access_logging"
-    - "data_protection"
-    - "authentication_monitoring"
-    - "privilege_management"
-    - "audit_trail"
-    - "change_management"
-    - "incident_response"
-    - "vulnerability_management"
-    - "configuration_management"
-    - "business_continuity"
-  
-  # Compliance query requirements
+  max_standards: 5
+  max_controls: 10
   min_retention_days: 365
   max_audit_gap_hours: 24
-  required_evidence_fields:
-    - "timestamp"
-    - "user"
-    - "action"
-    - "resource"
-    - "outcome"
 
-# Behavioral analytics configuration
-behavioral_analytics:
-  # User profiling parameters
-  user_profiling:
-    min_baseline_days: 7
-    max_baseline_days: 90
-    anomaly_threshold: 2.5
-    confidence_interval: 0.95
-  
-  # Risk scoring parameters
-  risk_scoring:
-    min_risk_score: 0.0
-    max_risk_score: 10.0
-    critical_threshold: 8.0
-    high_threshold: 6.0
-    medium_threshold: 4.0
-    low_threshold: 2.0
-  
-  # Machine learning model parameters
-  ml_parameters:
-    min_training_samples: 1000
-    max_features: 100
-    model_refresh_hours: 24
-    anomaly_detection_window: "1_hour"
-  
-  # Allowed statistical analysis types
-  allowed_statistical_analysis:
-    - "mean"
-    - "median"
-    - "mode"
-    - "standard_deviation"
-    - "variance"
-    - "percentile"
-    - "z_score"
-    - "confidence_interval"
-    - "correlation_coefficient"
-    - "regression_analysis"
-
-# Security pattern detection
-security_patterns:
-  # Kill chain phases for APT detection
-  kill_chain_phases:
-    - "reconnaissance"
-    - "weaponization"
-    - "delivery"
-    - "exploitation"
-    - "installation"
-    - "command_control"
-    - "actions_objectives"
-  
-  # Threat intelligence indicators
-  threat_indicators:
-    - "unusual_login_patterns"
-    - "privilege_escalation_attempts"
-    - "lateral_movement_indicators"
-    - "data_exfiltration_patterns"
-    - "persistence_mechanisms"
-    - "evasion_techniques"
-    - "credential_access_attempts"
-    - "discovery_activities"
-  
-  # Detection thresholds
-  detection_thresholds:
-    rapid_operations_per_minute: 50
-    failed_auth_attempts_per_hour: 10
-    cross_namespace_access_threshold: 5
-    privilege_escalation_score: 7.0
-    anomaly_deviation_threshold: 3.0
-
-# Time-based security rules
-time_based_security:
-  # Maintenance windows
-  maintenance_windows:
-    default_start_time: "02:00"
-    default_end_time: "04:00"
-    max_window_hours: 8
-    min_window_hours: 1
-  
-  # Business hours security
-  business_hours_security:
-    monitor_after_hours: true
-    elevated_monitoring_threshold: 5
-    weekend_monitoring_enabled: true
-    holiday_monitoring_enabled: true
-  
-  # Temporal correlation windows
-  temporal_correlation:
-    min_correlation_window: "1_minute"
-    max_correlation_window: "24_hours"
-    default_correlation_window: "15_minutes"
-
-# OpenShift-specific security rules
-openshift_security:
-  # Security Context Constraints monitoring
-  scc_monitoring:
-    privileged_scc_alert: true
-    anyuid_scc_alert: true
-    hostaccess_scc_alert: true
-    nonroot_scc_required: true
-  
-  # Route security monitoring
-  route_security:
-    insecure_route_alert: true
-    wildcard_route_alert: true
-    custom_tls_alert: true
-  
-  # Build security monitoring
-  build_security:
-    privileged_build_alert: true
-    docker_strategy_alert: true
-    custom_builder_alert: true
-    source_secret_access_alert: true
-  
-  # Project security monitoring
-  project_security:
-    project_creation_alert: true
-    project_deletion_alert: true
-    cross_project_access_alert: true
-    system_project_access_alert: true
-
-# Advanced query performance limits
-performance_limits:
-  # Complex query thresholds
-  max_query_complexity_score: 100
-  max_concurrent_sources: 5
+# Multi-Source Rules
+multi_source:
+  enabled: true
+  max_sources: 5
   max_correlation_fields: 10
-  max_behavioral_features: 50
-  
-  # Resource usage limits
+  max_correlation_complexity: 100
+
+# Performance Rules
+performance:
+  enabled: true
+  max_query_complexity_score: 100
   max_memory_usage_mb: 1024
   max_cpu_usage_percent: 50
-  max_execution_time_seconds: 300
-  
-  # Result set limits
-  max_raw_results: 10000
-  max_aggregated_results: 1000
-  max_correlation_matches: 500
+  max_execution_time_seconds: 60
+  max_raw_results: 1000
+  max_aggregated_results: 500
+  max_concurrent_sources: 3
 
-# Prompt validation and input/output limits
-prompt_validation:
-  # Input/output length limits
-  max_input_length: 1000
-  max_output_length: 2000
+# Legacy Safety Rules (streamlined for compatibility)
+safety_rules:
+  # Core log sources for audit queries
+  allowed_log_sources:
+    - "kube-apiserver"
+    - "openshift-apiserver"
+    - "oauth-server"
+    - "oauth-apiserver"
+    - "node-auditd"
   
-  # Required fields for valid audit queries
+  # Standard HTTP verbs for audit queries
+  allowed_verbs:
+    - "get"
+    - "list"
+    - "create"
+    - "update"
+    - "patch"
+    - "delete"
+    - "watch"
+    - "impersonate"
+  
+  # Core Kubernetes/OpenShift resources (commonly audited)
+  allowed_resources:
+    - "pods"
+    - "services"
+    - "deployments"
+    - "configmaps"
+    - "secrets"
+    - "namespaces"
+    - "serviceaccounts"
+    - "roles"
+    - "rolebindings"
+    - "clusterroles"
+    - "clusterrolebindings"
+    - "customresourcedefinitions"
+    - "persistentvolumeclaims"
+    - "networkpolicies"
+    - "events"
+    - "nodes"
+    - "routes"
+    - "builds"
+    - "imagestreams"
+    - "projects"
+    - "users"
+    - "groups"
+    - "oauthclients"
+    - "securitycontextconstraints"
+  
+  # Essential forbidden patterns (security-critical only)
+  forbidden_patterns:
+    - "system:admin"
+    - "system:masters"
+    - "cluster-admin"
+    - "delete --all"
+    - "delete --force"
+    - "privileged: true"
+    - "hostNetwork: true"
+    - "runAsUser: 0"
+    - "oc adm policy add-cluster-role-to-user cluster-admin"
+    - "oc delete project --all"
+    - "service-account-token"
+    - "bearer token"
+  
+  
+  # Required fields for validation
   required_fields:
     - "log_source"
-  
-  # Forbidden words and patterns (consolidated with safety_rules.forbidden_patterns)
-  forbidden_words:
-    - "rm -rf"
-    - "delete --all"
-    - "system:admin"
-    - "drop database"
-    - "format c:"
-    - "shutdown"
-    - "reboot"
-    - "kill"
-    - "terminate"
+
+# Essential input sanitization
+sanitization:
+  max_query_length: 10000
+  max_pattern_length: 500
+  valid_regex_pattern: "^[a-zA-Z0-9\\-_\\*\\.\\?\\+\\[\\]\\{\\}\\(\\)\\|\\\\/\\s]+$"
+  valid_ip_pattern: "^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$"
+  forbidden_chars: ["<", ">", "&", "\"", "'", "`", "|", ";", "$"]
+  # Essential limits (consolidated from PerformanceRule and timeframe_limits - based on analysis of 180 test queries)
+  max_result_limit: 50         # vs previous over-engineered max_limit: 1000, default_limit: 20, min_limit: 1
+  max_array_elements: 15       # vs previous over-engineered 100
+  max_days_back: 90           # moved from timeframe_limits - essential security boundary
+  allowed_timeframes:         # moved from timeframe_limits - complete input validation whitelist
+    - "today"
+    - "yesterday" 
+    - "1_hour_ago"
+    - "6_hours_ago"
+    - "12_hours_ago"
+    - "1_day_ago"
+    - "3_days_ago"
+    - "7_days_ago"
+    - "30_days_ago"
+    - "90_days_ago"
+

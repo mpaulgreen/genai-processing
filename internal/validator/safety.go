@@ -18,9 +18,7 @@ type SafetyValidator struct {
 	ruleEngine          *RuleEngine
 	// Legacy rules for backward compatibility
 	rules               []interfaces.ValidationRule
-	whitelist           *rules.WhitelistRule
 	sanitization        *rules.SanitizationRule
-	timeframe           *rules.TimeframeRule
 	patterns            *rules.PatternsRule
 	requiredFields      *rules.RequiredFieldsRule
 }
@@ -45,14 +43,6 @@ func NewSafetyValidator() *SafetyValidator {
 			"forbidden_chars":    []interface{}{"<", ">", "&", "\"", "'", "`", "|", ";", "$", "(", ")", "{", "}", "[", "]", "\\", "/", "!", "@", "#", "%", "^", "*", "+", "=", "~"},
 		}
 
-		// Add default timeframe config
-		config.SafetyRules.TimeframeLimits = map[string]interface{}{
-			"max_days_back":      90,
-			"default_limit":      20,
-			"max_limit":          1000,
-			"min_limit":          1,
-			"allowed_timeframes": []interface{}{"today", "yesterday", "1_hour_ago", "2_hours_ago", "3_hours_ago", "6_hours_ago", "12_hours_ago", "1_day_ago", "2_days_ago", "3_days_ago", "7_days_ago", "14_days_ago", "30_days_ago", "60_days_ago", "90_days_ago"},
-		}
 
 		// Add default required fields
 		config.SafetyRules.RequiredFields = []string{"log_source"}
@@ -164,14 +154,8 @@ func (sv *SafetyValidator) GetApplicableRules() []interfaces.ValidationRule {
 	var activeRules []interfaces.ValidationRule
 
 	// Add core rules
-	if sv.whitelist != nil && sv.whitelist.IsEnabled() {
-		activeRules = append(activeRules, sv.whitelist)
-	}
 	if sv.sanitization != nil && sv.sanitization.IsEnabled() {
 		activeRules = append(activeRules, sv.sanitization)
-	}
-	if sv.timeframe != nil && sv.timeframe.IsEnabled() {
-		activeRules = append(activeRules, sv.timeframe)
 	}
 	if sv.patterns != nil && sv.patterns.IsEnabled() {
 		activeRules = append(activeRules, sv.patterns)
@@ -201,25 +185,22 @@ func (sv *SafetyValidator) GetApplicableRules() []interfaces.ValidationRule {
 
 // initializeLegacyRules initializes legacy validation rules from configuration
 func (sv *SafetyValidator) initializeLegacyRules() {
-	// Initialize whitelist rule
-	if len(sv.config.SafetyRules.AllowedLogSources) > 0 ||
-		len(sv.config.SafetyRules.AllowedVerbs) > 0 ||
-		len(sv.config.SafetyRules.AllowedResources) > 0 {
-		sv.whitelist = rules.NewWhitelistRule(
-			sv.config.SafetyRules.AllowedLogSources,
-			sv.config.SafetyRules.AllowedVerbs,
-			sv.config.SafetyRules.AllowedResources,
-		)
-	}
-
-	// Initialize sanitization rule
+	// Initialize sanitization rule with enhanced configuration
+	// The sanitization rule now includes timeframe validation and essential limits
 	if sv.config.SafetyRules.Sanitization != nil {
 		sv.sanitization = rules.NewSanitizationRule(sv.config.SafetyRules.Sanitization)
-	}
-
-	// Initialize timeframe rule
-	if sv.config.SafetyRules.TimeframeLimits != nil {
-		sv.timeframe = rules.NewTimeframeRule(sv.config.SafetyRules.TimeframeLimits)
+	} else {
+		// Create with default enhanced sanitization config
+		defaultConfig := map[string]interface{}{
+			"max_pattern_length": 500,
+			"max_query_length":   10000,
+			"forbidden_chars":    []interface{}{"<", ">", "&", "\"", "'", "`", "|", ";", "$"},
+			"max_result_limit":   50,
+			"max_array_elements": 15,
+			"max_days_back":      90,
+			"allowed_timeframes": []interface{}{"today", "yesterday", "1_hour_ago", "6_hours_ago", "12_hours_ago", "1_day_ago", "3_days_ago", "7_days_ago", "30_days_ago", "90_days_ago"},
+		}
+		sv.sanitization = rules.NewSanitizationRule(defaultConfig)
 	}
 
 	// Initialize patterns rule
@@ -249,9 +230,7 @@ func (sv *SafetyValidator) GetValidationStats() map[string]interface{} {
 	activeRules := sv.GetApplicableRules()
 	stats["total_active_rules"] = len(activeRules)
 	stats["schema_validator_enabled"] = sv.schemaValidator != nil
-	stats["whitelist_enabled"] = sv.whitelist != nil && sv.whitelist.IsEnabled()
 	stats["sanitization_enabled"] = sv.sanitization != nil && sv.sanitization.IsEnabled()
-	stats["timeframe_enabled"] = sv.timeframe != nil && sv.timeframe.IsEnabled()
 	stats["patterns_enabled"] = sv.patterns != nil && sv.patterns.IsEnabled()
 	stats["required_fields_enabled"] = sv.requiredFields != nil && sv.requiredFields.IsEnabled()
 	stats["rule_engine_enabled"] = sv.ruleEngine != nil
@@ -315,12 +294,7 @@ func (sv *SafetyValidator) applyBasicRules(query *types.StructuredQuery) map[str
 		ruleResults["required_fields"] = sv.requiredFields.Validate(query)
 	}
 
-	// Apply whitelist validation
-	if sv.whitelist != nil && sv.whitelist.IsEnabled() {
-		ruleResults["whitelist"] = sv.whitelist.Validate(query)
-	}
-
-	// Apply sanitization validation
+	// Apply enhanced sanitization validation (includes timeframe and essential limits)
 	if sv.sanitization != nil && sv.sanitization.IsEnabled() {
 		ruleResults["sanitization"] = sv.sanitization.Validate(query)
 	}
@@ -328,11 +302,6 @@ func (sv *SafetyValidator) applyBasicRules(query *types.StructuredQuery) map[str
 	// Apply patterns validation
 	if sv.patterns != nil && sv.patterns.IsEnabled() {
 		ruleResults["patterns"] = sv.patterns.Validate(query)
-	}
-
-	// Apply timeframe validation
-	if sv.timeframe != nil && sv.timeframe.IsEnabled() {
-		ruleResults["timeframe"] = sv.timeframe.Validate(query)
 	}
 
 	// Apply additional basic rules

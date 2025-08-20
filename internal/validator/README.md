@@ -18,10 +18,9 @@ Unit 3 introduces a sophisticated **four-phase validation pipeline** that proces
         ▼                      ▼                      ▼                      ▼
 Schema Validator        Legacy Rules           RuleEngine              Result Aggregation
 - Field validation      - Patterns             - Advanced Analysis     - Error consolidation
-- Type checking         - Required fields      - Behavioral Analytics  - Performance metrics
+- Type checking         - Required fields      - Behavioral Analytics  - Error consolidation
 - Cross-dependencies    - Sanitization         - Compliance           - Recommendations
-- Performance limits    - Timeframe           - Multi-source          - Final result
-                       - Whitelist            - Performance
+- Cross-dependencies    - Field values        - Multi-source          - Final result
 ```
 
 ### Component Interaction and Collaboration
@@ -57,7 +56,6 @@ Each advanced rule processor implements comprehensive validation for specific do
 - **BehavioralAnalyticsRule**: Risk scoring, anomaly detection, user profiling
 - **ComplianceRule**: SOX/PCI-DSS/GDPR compliance, retention policies, evidence collection
 - **MultiSourceRule**: Cross-source correlation, field compatibility, performance optimization
-- **PerformanceRule**: Resource usage estimation, complexity scoring, execution limits
 
 ## Package Components
 
@@ -188,20 +186,6 @@ Advanced validation for cross-source log correlation and analysis:
 }
 ```
 
-#### `rules/performance.go` - Performance Validation
-Comprehensive performance analysis and resource usage validation:
-
-- **Multi-dimensional validation**: complexity, memory, CPU, execution time
-- **Resource usage estimation** based on query characteristics
-- **Performance tier classification** (Low/Medium/High)
-- **Concurrency limit enforcement** for multi-source queries
-- **Result set size optimization** and aggregation detection
-
-**Example Usage**: Validates queries against performance thresholds:
-- Complexity score limits (default: 100)
-- Memory usage limits (default: 1024 MB)
-- CPU usage limits (default: 50%)
-- Execution time limits (default: 60 seconds)
 
 ### Legacy Validation Rules (Maintained for Compatibility)
 
@@ -218,13 +202,6 @@ Comprehensive performance analysis and resource usage validation:
 - **Character filtering** and encoding validation
 - **Pattern length limits** and format enforcement
 
-#### `rules/timeframe.go` - Time-based Validation
-- **Timeframe format validation** and range constraints
-- **Business hours enforcement** and date limit validation
-
-#### `rules/whitelist.go` - Allowed Value Validation
-- **Log source whitelisting** and verb validation
-- **Resource validation** with case-insensitive matching
 
 ## Practical Examples from Functional Tests
 
@@ -603,7 +580,6 @@ go test ./internal/validator/rules -run TestAdvancedAnalysisRule -v
 go test ./internal/validator/rules -run TestBehavioralAnalyticsRule -v
 go test ./internal/validator/rules -run TestComplianceRule -v
 go test ./internal/validator/rules -run TestMultiSourceRule -v
-go test ./internal/validator/rules -run TestPerformanceRule -v
 
 # Test legacy rules (maintained compatibility)
 go test ./internal/validator/rules -run TestPatternsRule -v
@@ -690,7 +666,6 @@ go test ./internal/validator -run TestAdvancedQueries -v
 - ✅ **Advanced Analysis**: APT detection validation
 - ✅ **Behavioral Analytics**: Risk scoring validation
 - ✅ **Compliance**: Multi-standard enforcement
-- ✅ **Performance**: Resource usage validation
 
 #### Concurrent Safety
 - ✅ **Thread Safety**: All validation operations
@@ -767,7 +742,6 @@ func TestYourNewRule_Validate(t *testing.T) {
 1. **Enhanced RuleEngine**: Sophisticated rule evaluation with dependency resolution and parallel execution
 2. **Multi-Phase Pipeline**: Four-phase validation (Schema → Safety → Advanced → Aggregation)
 3. **Advanced Rule Processors**: Five new specialized rule processors for enterprise requirements
-4. **Performance Optimization**: Multi-dimensional performance validation and resource management
 5. **Compliance Integration**: Enterprise-grade compliance framework support
 6. **Configuration Enhancement**: Comprehensive YAML configuration with rule-specific settings
 
@@ -782,7 +756,6 @@ func TestYourNewRule_Validate(t *testing.T) {
 
 - **79 Tests Fixed**: All previously failing tests from architectural changes now pass
 - **Comprehensive Coverage**: Enhanced test coverage across all components
-- **Performance Validation**: All performance targets met or exceeded
 - **Functional Integration**: Successfully validates all 180 functional test queries
 
-The Unit 3 enhancement transforms the validation system from basic safety checks into a comprehensive, enterprise-grade validation framework capable of handling sophisticated security analysis, compliance requirements, and performance optimization.
+The Unit 3 enhancement transforms the validation system from basic safety checks into a comprehensive, enterprise-grade validation framework capable of handling sophisticated security analysis and compliance requirements.

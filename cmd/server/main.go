@@ -199,7 +199,7 @@ func logConfigurationStatus(appConfig *config.AppConfig) {
 	log.Printf("  Max Days Back: %d", appConfig.Rules.SafetyRules.TimeframeLimits.MaxDaysBack)
 	log.Printf("  Default Query Limit: %d", appConfig.Rules.SafetyRules.TimeframeLimits.DefaultLimit)
 	log.Printf("  Max Query Limit: %d", appConfig.Rules.SafetyRules.TimeframeLimits.MaxLimit)
-	log.Printf("  Business Hours: %d-%d %s", appConfig.Rules.BusinessHours.DefaultStartHour, appConfig.Rules.BusinessHours.DefaultEndHour, appConfig.Rules.BusinessHours.DefaultTimezone)
+	log.Printf("  Business Hours Presets: %v", appConfig.Rules.BusinessHours.AllowedPresets)
 	log.Printf("  Prompt Validation - Max Input: %d", appConfig.Rules.PromptValidation.MaxInputLength)
 	log.Printf("  Prompt Validation - Max Output: %d", appConfig.Rules.PromptValidation.MaxOutputLength)
 	log.Printf("  Prompt Validation - Required Fields: %v", appConfig.Rules.PromptValidation.RequiredFields)

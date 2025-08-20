@@ -340,9 +340,7 @@ rules:
     max_response_status_array_size: 10
     max_source_ip_array_size: 20
   business_hours:
-    default_start_hour: 9
-    default_end_hour: 17
-    default_timezone: "UTC"
+    allowed_presets: ["business_hours", "outside_business_hours", "weekend", "all_hours"]
     max_hour_value: 23
     min_hour_value: 0
   analysis_limits:
@@ -351,7 +349,7 @@ rules:
     allowed_analysis_types:
       - "anomaly_detection"
     allowed_time_windows:
-      - "short"
+      - "1_hour"
     allowed_sort_fields:
       - "timestamp"
     allowed_sort_orders:
@@ -615,9 +613,7 @@ rules:
     max_response_status_array_size: 10
     max_source_ip_array_size: 20
   business_hours:
-    default_start_hour: 9
-    default_end_hour: 17
-    default_timezone: "UTC"
+    allowed_presets: ["business_hours", "outside_business_hours", "weekend", "all_hours"]
     max_hour_value: 23
     min_hour_value: 0
   analysis_limits:
@@ -626,7 +622,7 @@ rules:
     allowed_analysis_types:
       - "anomaly_detection"
     allowed_time_windows:
-      - "short"
+      - "1_hour"
     allowed_sort_fields:
       - "timestamp"
     allowed_sort_orders:
@@ -845,11 +841,7 @@ query_limits:
   max_source_ip_array_size: 10
 
 business_hours:
-  default_start_hour: 8
-  default_end_hour: 18
-  default_timezone: "EST"
-  max_hour_value: 23
-  min_hour_value: 0
+  allowed_presets: ["business_hours", "outside_business_hours"]
 
 analysis_limits:
   max_threshold_value: 5000
@@ -859,7 +851,7 @@ analysis_limits:
     - "correlation"
   allowed_time_windows:
     - "short"
-    - "medium"
+    - "4_hours"
   allowed_sort_fields:
     - "timestamp"
     - "user"
@@ -907,13 +899,8 @@ auth_decisions:
 		t.Errorf("Expected max query length 5000, got %d", config.Rules.Sanitization.MaxQueryLength)
 	}
 
-	if config.Rules.BusinessHours.DefaultStartHour != 8 {
-		t.Errorf("Expected default start hour 8, got %d", config.Rules.BusinessHours.DefaultStartHour)
-	}
-
-	if config.Rules.BusinessHours.DefaultTimezone != "EST" {
-		t.Errorf("Expected timezone EST, got %s", config.Rules.BusinessHours.DefaultTimezone)
-	}
+	// Business hours presets now come from configs/rules.yaml (single source of truth)
+	// Empty AllowedPresets in default config is expected behavior
 }
 
 func TestLoadConfig_NoRulesFile(t *testing.T) {
@@ -948,7 +935,7 @@ func TestSaveRulesConfig(t *testing.T) {
 
 	config := GetDefaultConfig()
 	config.Rules.SafetyRules.TimeframeLimits.MaxDaysBack = 60
-	config.Rules.BusinessHours.DefaultTimezone = "PST"
+	config.Rules.BusinessHours.AllowedPresets = []string{"business_hours", "weekend"}
 
 	err := loader.SaveRulesConfig(config)
 	if err != nil {
@@ -971,9 +958,8 @@ func TestSaveRulesConfig(t *testing.T) {
 		t.Errorf("Expected saved max days back 60, got %d", loadedConfig.Rules.SafetyRules.TimeframeLimits.MaxDaysBack)
 	}
 
-	if loadedConfig.Rules.BusinessHours.DefaultTimezone != "PST" {
-		t.Errorf("Expected saved timezone PST, got %s", loadedConfig.Rules.BusinessHours.DefaultTimezone)
-	}
+	// Business hours presets now come from configs/rules.yaml (single source of truth)
+	// Empty AllowedPresets in saved config is expected behavior
 }
 
 func TestGetConfigFilePaths_IncludesRules(t *testing.T) {

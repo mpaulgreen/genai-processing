@@ -226,7 +226,6 @@ safety_rules:
   rule_categories:
     - "security"
     - "compliance"
-    - "performance"
 `
 
 	tmpDir := t.TempDir()
@@ -267,8 +266,8 @@ safety_rules:
 		t.Errorf("Expected 4 severity levels, got %d", len(config.SafetyRules.SeverityLevels))
 	}
 	
-	if len(config.SafetyRules.RuleCategories) != 3 {
-		t.Errorf("Expected 3 rule categories, got %d", len(config.SafetyRules.RuleCategories))
+	if len(config.SafetyRules.RuleCategories) != 2 {
+		t.Errorf("Expected 2 rule categories, got %d", len(config.SafetyRules.RuleCategories))
 	}
 
 	// Test map fields are loaded

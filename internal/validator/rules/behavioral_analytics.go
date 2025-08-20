@@ -386,7 +386,27 @@ func (r *BehavioralAnalyticsRule) calculatePerformanceImpact(config *types.Behav
 
 // Configuration retrieval methods
 func (r *BehavioralAnalyticsRule) getAllowedBaselineWindows() []string {
-	return []string{"7_days", "14_days", "30_days", "60_days", "90_days"}
+	if r.config == nil {
+		return r.getDefaultBaselineWindows()
+	}
+
+	if allowedWindows, ok := r.config["allowed_baseline_windows"].([]interface{}); ok {
+		windows := make([]string, len(allowedWindows))
+		for i, w := range allowedWindows {
+			if str, ok := w.(string); ok {
+				windows[i] = str
+			}
+		}
+		return windows
+	}
+
+	return r.getDefaultBaselineWindows()
+}
+
+func (r *BehavioralAnalyticsRule) getDefaultBaselineWindows() []string {
+	// Return empty list to force dependency on configuration file
+	// All baseline windows are now defined in configs/rules.yaml as single source of truth
+	return []string{}
 }
 
 func (r *BehavioralAnalyticsRule) getAllowedLearningPeriods() []string {

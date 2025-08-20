@@ -7,6 +7,54 @@ import (
 )
 
 func TestAdvancedAnalysisRule_Validate(t *testing.T) {
+	// Standard test configuration with allowed analysis types, time windows, and sort fields
+	testConfig := map[string]interface{}{
+		"allowed_analysis_types": []interface{}{
+			"apt_reconnaissance_detection",
+			"anomaly_detection",
+			"behavioral_analysis",
+			"statistical_analysis",
+			"user_behavior_anomaly_detection",
+			"temporal_auth_resource_correlation",
+			"multi_namespace_access",
+			"excessive_reads",
+			"privilege_escalation",
+			"correlation",
+		},
+		"allowed_time_windows": []interface{}{
+			"1_minute", "5_minutes", "10_minutes", "15_minutes", "30_minutes",
+			"1_hour", "2_hours", "4_hours", "6_hours", "8_hours", "12_hours", "24_hours",
+			"48_hours", "72_hours", "7_days", "14_days", "30_days",
+		},
+		"sort_configuration": map[string]interface{}{
+			"allowed_sort_fields": []interface{}{
+				"timestamp", "username", "resource", "verb", "count", "risk_score",
+				"frequency", "severity", "namespace", "auth_decision",
+			},
+			"allowed_sort_orders": []interface{}{
+				"asc", "desc",
+			},
+		},
+		"business_hours_configuration": map[string]interface{}{
+			"allowed_presets": []interface{}{
+				"business_hours", "outside_business_hours", "weekend", "all_hours",
+			},
+		},
+		"response_status_configuration": map[string]interface{}{
+			"allowed_status_codes": []interface{}{
+				"200", "201", "204", "400", "401", "403", "404", "409", "422", "500", "502", "503", "504",
+			},
+		},
+		"auth_decisions_configuration": map[string]interface{}{
+			"allowed_decisions": []interface{}{
+				"allow", "error", "forbid",
+			},
+		},
+		"max_group_by_fields": 3,
+		"max_threshold_value": 1000,
+		"min_threshold_value": 1,
+	}
+
 	tests := []struct {
 		name           string
 		config         map[string]interface{}
@@ -16,7 +64,7 @@ func TestAdvancedAnalysisRule_Validate(t *testing.T) {
 	}{
 		{
 			name:   "Valid APT reconnaissance analysis",
-			config: nil,
+			config: testConfig,
 			query: &types.StructuredQuery{
 				LogSource: "kube-apiserver",
 				Analysis: &types.AdvancedAnalysisConfig{
@@ -40,7 +88,7 @@ func TestAdvancedAnalysisRule_Validate(t *testing.T) {
 		},
 		{
 			name:   "Missing kill chain phase for APT analysis",
-			config: nil,
+			config: testConfig,
 			query: &types.StructuredQuery{
 				LogSource: "kube-apiserver",
 				Analysis: &types.AdvancedAnalysisConfig{
@@ -53,7 +101,7 @@ func TestAdvancedAnalysisRule_Validate(t *testing.T) {
 		},
 		{
 			name:   "Invalid analysis type",
-			config: nil,
+			config: testConfig,
 			query: &types.StructuredQuery{
 				LogSource: "kube-apiserver",
 				Analysis: &types.AdvancedAnalysisConfig{
@@ -65,7 +113,7 @@ func TestAdvancedAnalysisRule_Validate(t *testing.T) {
 		},
 		{
 			name:   "Invalid kill chain phase",
-			config: nil,
+			config: testConfig,
 			query: &types.StructuredQuery{
 				LogSource: "kube-apiserver",
 				Analysis: &types.AdvancedAnalysisConfig{
@@ -78,7 +126,7 @@ func TestAdvancedAnalysisRule_Validate(t *testing.T) {
 		},
 		{
 			name:   "Invalid statistical analysis parameters",
-			config: nil,
+			config: testConfig,
 			query: &types.StructuredQuery{
 				LogSource: "kube-apiserver",
 				Analysis: &types.AdvancedAnalysisConfig{
@@ -97,6 +145,11 @@ func TestAdvancedAnalysisRule_Validate(t *testing.T) {
 		{
 			name:   "Invalid threshold value",
 			config: map[string]interface{}{
+				"allowed_analysis_types": []interface{}{"anomaly_detection"},
+				"sort_configuration": map[string]interface{}{
+					"allowed_sort_fields": []interface{}{"timestamp", "count"},
+					"allowed_sort_orders": []interface{}{"asc", "desc"},
+				},
 				"max_threshold_value": 1000,
 				"min_threshold_value": 1,
 			},
@@ -112,7 +165,7 @@ func TestAdvancedAnalysisRule_Validate(t *testing.T) {
 		},
 		{
 			name:   "Invalid time window",
-			config: nil,
+			config: testConfig,
 			query: &types.StructuredQuery{
 				LogSource: "kube-apiserver",
 				Analysis: &types.AdvancedAnalysisConfig{
@@ -125,7 +178,7 @@ func TestAdvancedAnalysisRule_Validate(t *testing.T) {
 		},
 		{
 			name:   "Invalid sort field",
-			config: nil,
+			config: testConfig,
 			query: &types.StructuredQuery{
 				LogSource: "kube-apiserver",
 				Analysis: &types.AdvancedAnalysisConfig{
@@ -138,7 +191,7 @@ func TestAdvancedAnalysisRule_Validate(t *testing.T) {
 		},
 		{
 			name:   "Invalid sort order",
-			config: nil,
+			config: testConfig,
 			query: &types.StructuredQuery{
 				LogSource: "kube-apiserver",
 				Analysis: &types.AdvancedAnalysisConfig{
@@ -153,6 +206,11 @@ func TestAdvancedAnalysisRule_Validate(t *testing.T) {
 		{
 			name:   "Too many group by fields",
 			config: map[string]interface{}{
+				"allowed_analysis_types": []interface{}{"anomaly_detection"},
+				"sort_configuration": map[string]interface{}{
+					"allowed_sort_fields": []interface{}{"timestamp", "count"},
+					"allowed_sort_orders": []interface{}{"asc", "desc"},
+				},
 				"max_group_by_fields": 3,
 			},
 			query: &types.StructuredQuery{
@@ -169,7 +227,7 @@ func TestAdvancedAnalysisRule_Validate(t *testing.T) {
 		},
 		{
 			name:   "No analysis configuration",
-			config: nil,
+			config: testConfig,
 			query: &types.StructuredQuery{
 				LogSource: "kube-apiserver",
 				// No Analysis field
@@ -179,7 +237,7 @@ func TestAdvancedAnalysisRule_Validate(t *testing.T) {
 		},
 		{
 			name:   "Missing analysis type",
-			config: nil,
+			config: testConfig,
 			query: &types.StructuredQuery{
 				LogSource: "kube-apiserver",
 				Analysis: &types.AdvancedAnalysisConfig{
@@ -238,7 +296,38 @@ func TestAdvancedAnalysisRule_ValidateAnalysisType(t *testing.T) {
 		{"Empty type", "", false},
 	}
 
-	rule := NewAdvancedAnalysisRule(nil)
+	// Use test configuration instead of nil
+	testConfig := map[string]interface{}{
+		"allowed_analysis_types": []interface{}{
+			"apt_reconnaissance_detection",
+			"anomaly_detection",
+			"behavioral_analysis", 
+			"statistical_analysis",
+			"user_behavior_anomaly_detection",
+			"temporal_auth_resource_correlation",
+			"multi_namespace_access",
+			"excessive_reads",
+			"privilege_escalation",
+			"correlation",
+		},
+		"allowed_time_windows": []interface{}{
+			"1_minute", "5_minutes", "10_minutes", "15_minutes", "30_minutes",
+			"1_hour", "2_hours", "4_hours", "6_hours", "8_hours", "12_hours", "24_hours",
+			"48_hours", "72_hours", "7_days", "14_days", "30_days",
+		},
+		"sort_configuration": map[string]interface{}{
+			"allowed_sort_fields": []interface{}{
+				"timestamp", "username", "resource", "verb", "count", "risk_score",
+			},
+			"allowed_sort_orders": []interface{}{
+				"asc", "desc",
+			},
+		},
+		"max_group_by_fields": 3,
+		"max_threshold_value": 1000,
+		"min_threshold_value": 1,
+	}
+	rule := NewAdvancedAnalysisRule(testConfig)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -275,7 +364,38 @@ func TestAdvancedAnalysisRule_ValidateKillChainPhase(t *testing.T) {
 		{"Empty phase (optional)", "", true},
 	}
 
-	rule := NewAdvancedAnalysisRule(nil)
+	// Use test configuration instead of nil
+	testConfig := map[string]interface{}{
+		"allowed_analysis_types": []interface{}{
+			"apt_reconnaissance_detection",
+			"anomaly_detection",
+			"behavioral_analysis", 
+			"statistical_analysis",
+			"user_behavior_anomaly_detection",
+			"temporal_auth_resource_correlation",
+			"multi_namespace_access",
+			"excessive_reads",
+			"privilege_escalation",
+			"correlation",
+		},
+		"allowed_time_windows": []interface{}{
+			"1_minute", "5_minutes", "10_minutes", "15_minutes", "30_minutes",
+			"1_hour", "2_hours", "4_hours", "6_hours", "8_hours", "12_hours", "24_hours",
+			"48_hours", "72_hours", "7_days", "14_days", "30_days",
+		},
+		"sort_configuration": map[string]interface{}{
+			"allowed_sort_fields": []interface{}{
+				"timestamp", "username", "resource", "verb", "count", "risk_score",
+			},
+			"allowed_sort_orders": []interface{}{
+				"asc", "desc",
+			},
+		},
+		"max_group_by_fields": 3,
+		"max_threshold_value": 1000,
+		"min_threshold_value": 1,
+	}
+	rule := NewAdvancedAnalysisRule(testConfig)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -356,7 +476,38 @@ func TestAdvancedAnalysisRule_ValidateStatisticalAnalysis(t *testing.T) {
 		},
 	}
 
-	rule := NewAdvancedAnalysisRule(nil)
+	// Use test configuration instead of nil
+	testConfig := map[string]interface{}{
+		"allowed_analysis_types": []interface{}{
+			"apt_reconnaissance_detection",
+			"anomaly_detection",
+			"behavioral_analysis", 
+			"statistical_analysis",
+			"user_behavior_anomaly_detection",
+			"temporal_auth_resource_correlation",
+			"multi_namespace_access",
+			"excessive_reads",
+			"privilege_escalation",
+			"correlation",
+		},
+		"allowed_time_windows": []interface{}{
+			"1_minute", "5_minutes", "10_minutes", "15_minutes", "30_minutes",
+			"1_hour", "2_hours", "4_hours", "6_hours", "8_hours", "12_hours", "24_hours",
+			"48_hours", "72_hours", "7_days", "14_days", "30_days",
+		},
+		"sort_configuration": map[string]interface{}{
+			"allowed_sort_fields": []interface{}{
+				"timestamp", "username", "resource", "verb", "count", "risk_score",
+			},
+			"allowed_sort_orders": []interface{}{
+				"asc", "desc",
+			},
+		},
+		"max_group_by_fields": 3,
+		"max_threshold_value": 1000,
+		"min_threshold_value": 1,
+	}
+	rule := NewAdvancedAnalysisRule(testConfig)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -378,7 +529,38 @@ func TestAdvancedAnalysisRule_ValidateStatisticalAnalysis(t *testing.T) {
 }
 
 func TestAdvancedAnalysisRule_ConfigDefaults(t *testing.T) {
-	rule := NewAdvancedAnalysisRule(nil)
+	// Use test configuration instead of nil
+	testConfig := map[string]interface{}{
+		"allowed_analysis_types": []interface{}{
+			"apt_reconnaissance_detection",
+			"anomaly_detection",
+			"behavioral_analysis", 
+			"statistical_analysis",
+			"user_behavior_anomaly_detection",
+			"temporal_auth_resource_correlation",
+			"multi_namespace_access",
+			"excessive_reads",
+			"privilege_escalation",
+			"correlation",
+		},
+		"allowed_time_windows": []interface{}{
+			"1_minute", "5_minutes", "10_minutes", "15_minutes", "30_minutes",
+			"1_hour", "2_hours", "4_hours", "6_hours", "8_hours", "12_hours", "24_hours",
+			"48_hours", "72_hours", "7_days", "14_days", "30_days",
+		},
+		"sort_configuration": map[string]interface{}{
+			"allowed_sort_fields": []interface{}{
+				"timestamp", "username", "resource", "verb", "count", "risk_score",
+			},
+			"allowed_sort_orders": []interface{}{
+				"asc", "desc",
+			},
+		},
+		"max_group_by_fields": 3,
+		"max_threshold_value": 1000,
+		"min_threshold_value": 1,
+	}
+	rule := NewAdvancedAnalysisRule(testConfig)
 	
 	// Test default analysis types
 	types := rule.getAllowedAnalysisTypes()
