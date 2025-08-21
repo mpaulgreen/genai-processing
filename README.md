@@ -1,3 +1,4 @@
+# This project is been ARCHIVED in curreny state
 ## Build and start the server
 ```
 go build -o server ./cmd/server
