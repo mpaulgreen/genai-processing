@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"genai-processing/pkg/types"
 	"gopkg.in/yaml.v3"
 )
 
@@ -49,6 +50,8 @@ type RuleCondition struct {
 	LogicalOperator string `yaml:"logical_operator,omitempty"`
 }
 
+// InputValidationConfig defines the consolidated configuration structure for input validation
+
 // ValidationConfig represents the comprehensive configuration structure for validation rules
 type ValidationConfig struct {
 	SafetyRules struct {
@@ -68,6 +71,9 @@ type ValidationConfig struct {
 		RuleCategories     []string                 `yaml:"rule_categories"`
 	} `yaml:"safety_rules"`
 	
+	// Consolidated input validation configuration (replaces scattered sections)
+	InputValidation       types.InputValidationConfig  `yaml:"input_validation"`
+	
 	// Enhanced configuration sections for advanced rules
 	Sanitization          map[string]interface{} `yaml:"sanitization"`
 	QueryLimits           map[string]interface{} `yaml:"query_limits"`
@@ -82,6 +88,11 @@ type ValidationConfig struct {
 	TimeBasedSecurity     map[string]interface{} `yaml:"time_based_security"`
 	OpenShiftSecurity     map[string]interface{} `yaml:"openshift_security"`
 	PromptValidation      map[string]interface{} `yaml:"prompt_validation"`
+	
+	// Missing mappings for advanced features
+	AdvancedAnalysis      map[string]interface{} `yaml:"advanced_analysis"`
+	TimeWindows          map[string]interface{} `yaml:"time_windows"`
+	SortConfiguration    map[string]interface{} `yaml:"sort_configuration"`
 	
 	// Rule engine configuration
 	RuleEngine            RuleEngineConfig       `yaml:"rule_engine,omitempty"`
@@ -125,15 +136,12 @@ func GetRuleEngineDefaults() RuleEngineConfig {
 		FailFastMode:            true,
 		EnableRuleDependencies:  false,
 		RulePriorities:          map[string]int{
-			"schema_validation":    100,
-			"required_fields":      90,
-			"sanitization":        80,
-			"patterns":            70,
-			"field_values":        60,
-			"advanced_analysis":   50,
-			"multi_source":        40,
-			"behavioral_analytics": 30,
-			"compliance":          20,
+			"schema_validation":                 100,
+			"comprehensive_input_validation":    90,  // Replaces required_fields, sanitization, patterns, field_values
+			"advanced_analysis":                 50,
+			"multi_source":                      40,
+			"behavioral_analytics":              30,
+			"compliance":                        20,
 		},
 		EnableRuleCaching: true,
 		CacheTTLSeconds:   300, // 5 minutes
@@ -190,6 +198,12 @@ func (config *ValidationConfig) GetConfigSection(sectionName string) map[string]
 		return config.OpenShiftSecurity
 	case "prompt_validation":
 		return config.PromptValidation
+	case "advanced_analysis":
+		return config.AdvancedAnalysis
+	case "time_windows":
+		return config.TimeWindows
+	case "sort_configuration":
+		return config.SortConfiguration
 	default:
 		return nil
 	}

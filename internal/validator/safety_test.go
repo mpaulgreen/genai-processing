@@ -475,7 +475,31 @@ func TestSafetyValidator_SanitizationValidation(t *testing.T) {
 
 // TestSafetyValidator_PatternsValidation tests forbidden patterns validation specifically
 func TestSafetyValidator_PatternsValidation(t *testing.T) {
-	validator := NewSafetyValidator()
+	// Create a config with specific forbidden patterns for this test
+	config := &ValidationConfig{
+		InputValidation: types.InputValidationConfig{
+			Enabled: true,
+			RequiredFields: types.RequiredFieldsConfig{
+				Mandatory: []string{"log_source"},
+			},
+			CharacterValidation: types.CharacterValidationConfig{
+				MaxPatternLength: 500,
+				ForbiddenChars:   []string{},
+			},
+			SecurityPatterns: types.SecurityPatternsConfig{
+				ForbiddenPatterns: []string{"system:admin", "kube-system", "/api/v1/pods/.*/exec"},
+			},
+			FieldValues: types.FieldValuesConfig{
+				AllowedLogSources: []string{"kube-apiserver"},
+				AllowedVerbs:      []string{"get"},
+				AllowedResources:  []string{"pods"},
+			},
+			PerformanceLimits: types.PerformanceLimitsConfig{
+				MaxResultLimit: 50,
+			},
+		},
+	}
+	validator := NewSafetyValidatorWithConfig(config)
 
 	tests := []struct {
 		name        string
@@ -542,12 +566,12 @@ func TestSafetyValidator_GetValidationStats(t *testing.T) {
 		t.Error("Stats should contain total_active_rules")
 	}
 
-	if stats["sanitization_enabled"] == nil {
-		t.Error("Stats should contain sanitization_enabled")
+	if stats["comprehensive_input_validation_enabled"] == nil {
+		t.Error("Stats should contain comprehensive_input_validation_enabled")
 	}
 
-	if stats["patterns_enabled"] == nil {
-		t.Error("Stats should contain patterns_enabled")
+	if stats["schema_validator_enabled"] == nil {
+		t.Error("Stats should contain schema_validator_enabled")
 	}
 
 	// Check that at least one rule is enabled
@@ -643,9 +667,9 @@ func TestSafetyValidator_InitializeRules(t *testing.T) {
 	// Test with minimal config
 	validator := NewSafetyValidatorWithConfig(config)
 	
-	// Should handle empty config gracefully - sanitization now has defaults
-	if validator.sanitization == nil {
-		t.Error("Expected sanitization to be initialized with defaults")
+	// Should handle empty config gracefully - input validation now has defaults
+	if validator.inputValidator == nil {
+		t.Error("Expected inputValidator to be initialized with defaults")
 	}
 	
 	// Test with full config
@@ -660,17 +684,9 @@ func TestSafetyValidator_InitializeRules(t *testing.T) {
 	
 	validator = NewSafetyValidatorWithConfig(config)
 	
-	// Should initialize all rules
-	if validator.sanitization == nil {
-		t.Error("Expected sanitization to be initialized")
-	}
-	
-	if validator.patterns == nil {
-		t.Error("Expected patterns to be initialized")
-	}
-	
-	if validator.requiredFields == nil {
-		t.Error("Expected requiredFields to be initialized")
+	// Should initialize comprehensive input validation rule
+	if validator.inputValidator == nil {
+		t.Error("Expected inputValidator to be initialized")
 	}
 }
 

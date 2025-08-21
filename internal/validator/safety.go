@@ -16,11 +16,10 @@ type SafetyValidator struct {
 	config              *ValidationConfig
 	schemaValidator     interfaces.SchemaValidator
 	ruleEngine          *RuleEngine
-	// Legacy rules for backward compatibility
+	// Consolidated input validation rule (replaces overlapping legacy rules)
+	inputValidator      *rules.ComprehensiveInputValidationRule
+	// Additional legacy rules for backward compatibility
 	rules               []interfaces.ValidationRule
-	sanitization        *rules.SanitizationRule
-	patterns            *rules.PatternsRule
-	requiredFields      *rules.RequiredFieldsRule
 }
 
 // NewSafetyValidator creates a new instance of SafetyValidator.
@@ -153,15 +152,9 @@ func (sv *SafetyValidator) ValidateQuery(query *types.StructuredQuery) (*interfa
 func (sv *SafetyValidator) GetApplicableRules() []interfaces.ValidationRule {
 	var activeRules []interfaces.ValidationRule
 
-	// Add core rules
-	if sv.sanitization != nil && sv.sanitization.IsEnabled() {
-		activeRules = append(activeRules, sv.sanitization)
-	}
-	if sv.patterns != nil && sv.patterns.IsEnabled() {
-		activeRules = append(activeRules, sv.patterns)
-	}
-	if sv.requiredFields != nil && sv.requiredFields.IsEnabled() {
-		activeRules = append(activeRules, sv.requiredFields)
+	// Add comprehensive input validation rule
+	if sv.inputValidator != nil && sv.inputValidator.IsEnabled() {
+		activeRules = append(activeRules, sv.inputValidator)
 	}
 
 	// Add additional legacy rules
@@ -183,34 +176,14 @@ func (sv *SafetyValidator) GetApplicableRules() []interfaces.ValidationRule {
 	return activeRules
 }
 
-// initializeLegacyRules initializes legacy validation rules from configuration
+// initializeLegacyRules initializes the consolidated input validation rule
 func (sv *SafetyValidator) initializeLegacyRules() {
-	// Initialize sanitization rule with enhanced configuration
-	// The sanitization rule now includes timeframe validation and essential limits
-	if sv.config.SafetyRules.Sanitization != nil {
-		sv.sanitization = rules.NewSanitizationRule(sv.config.SafetyRules.Sanitization)
+	// Initialize the comprehensive input validation rule
+	if sv.config.InputValidation.Enabled {
+		sv.inputValidator = rules.NewComprehensiveInputValidationRule(&sv.config.InputValidation)
 	} else {
-		// Create with default enhanced sanitization config
-		defaultConfig := map[string]interface{}{
-			"max_pattern_length": 500,
-			"max_query_length":   10000,
-			"forbidden_chars":    []interface{}{"<", ">", "&", "\"", "'", "`", "|", ";", "$"},
-			"max_result_limit":   50,
-			"max_array_elements": 15,
-			"max_days_back":      90,
-			"allowed_timeframes": []interface{}{"today", "yesterday", "1_hour_ago", "6_hours_ago", "12_hours_ago", "1_day_ago", "3_days_ago", "7_days_ago", "30_days_ago", "90_days_ago"},
-		}
-		sv.sanitization = rules.NewSanitizationRule(defaultConfig)
-	}
-
-	// Initialize patterns rule
-	if len(sv.config.SafetyRules.ForbiddenPatterns) > 0 {
-		sv.patterns = rules.NewPatternsRule(sv.config.SafetyRules.ForbiddenPatterns)
-	}
-
-	// Initialize required fields rule
-	if len(sv.config.SafetyRules.RequiredFields) > 0 {
-		sv.requiredFields = rules.NewRequiredFieldsRule(sv.config.SafetyRules.RequiredFields)
+		// Create with default configuration if input validation is not configured
+		sv.inputValidator = rules.NewComprehensiveInputValidationRule(nil)
 	}
 
 	// Initialize additional legacy rules based on configuration
@@ -230,9 +203,7 @@ func (sv *SafetyValidator) GetValidationStats() map[string]interface{} {
 	activeRules := sv.GetApplicableRules()
 	stats["total_active_rules"] = len(activeRules)
 	stats["schema_validator_enabled"] = sv.schemaValidator != nil
-	stats["sanitization_enabled"] = sv.sanitization != nil && sv.sanitization.IsEnabled()
-	stats["patterns_enabled"] = sv.patterns != nil && sv.patterns.IsEnabled()
-	stats["required_fields_enabled"] = sv.requiredFields != nil && sv.requiredFields.IsEnabled()
+	stats["comprehensive_input_validation_enabled"] = sv.inputValidator != nil && sv.inputValidator.IsEnabled()
 	stats["rule_engine_enabled"] = sv.ruleEngine != nil
 
 	// Add rule engine statistics if available
@@ -285,23 +256,13 @@ func (sv *SafetyValidator) convertSchemaErrorToValidationResult(err error, query
 	}
 }
 
-// applyBasicRules applies basic safety validation rules
+// applyBasicRules applies comprehensive input validation
 func (sv *SafetyValidator) applyBasicRules(query *types.StructuredQuery) map[string]*interfaces.ValidationResult {
 	ruleResults := make(map[string]*interfaces.ValidationResult)
 
-	// Apply required fields validation first
-	if sv.requiredFields != nil && sv.requiredFields.IsEnabled() {
-		ruleResults["required_fields"] = sv.requiredFields.Validate(query)
-	}
-
-	// Apply enhanced sanitization validation (includes timeframe and essential limits)
-	if sv.sanitization != nil && sv.sanitization.IsEnabled() {
-		ruleResults["sanitization"] = sv.sanitization.Validate(query)
-	}
-
-	// Apply patterns validation
-	if sv.patterns != nil && sv.patterns.IsEnabled() {
-		ruleResults["patterns"] = sv.patterns.Validate(query)
+	// Apply comprehensive input validation (replaces sanitization, patterns, and required fields)
+	if sv.inputValidator != nil && sv.inputValidator.IsEnabled() {
+		ruleResults["comprehensive_input_validation"] = sv.inputValidator.Validate(query)
 	}
 
 	// Apply additional basic rules

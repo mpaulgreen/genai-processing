@@ -6,6 +6,23 @@ import (
 	"genai-processing/pkg/types"
 )
 
+// getTestTimeWindowsConfigForAdvanced returns a test time windows configuration for advanced analysis
+func getTestTimeWindowsConfigForAdvanced() map[string]interface{} {
+	return map[string]interface{}{
+		"allowed_time_windows": []interface{}{
+			"1_minute", "5_minutes", "10_minutes", "15_minutes", "30_minutes",
+			"1_hour", "2_hours", "4_hours", "6_hours", "8_hours", "12_hours", "24_hours",
+			"48_hours", "72_hours", "7_days", "14_days", "30_days",
+		},
+		"allowed_correlation_windows": []interface{}{
+			"1_minute", "5_minutes", "15_minutes", "30_minutes", "1_hour", "4_hours", "24_hours",
+		},
+		"allowed_baseline_windows": []interface{}{
+			"7_days", "14_days", "30_days", "60_days", "90_days",
+		},
+	}
+}
+
 func TestAdvancedAnalysisRule_Validate(t *testing.T) {
 	// Standard test configuration with allowed analysis types, time windows, and sort fields
 	testConfig := map[string]interface{}{
@@ -252,7 +269,7 @@ func TestAdvancedAnalysisRule_Validate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rule := NewAdvancedAnalysisRule(tt.config)
+			rule := NewAdvancedAnalysisRule(tt.config, getTestTimeWindowsConfigForAdvanced())
 			result := rule.Validate(tt.query)
 
 			if result.IsValid != tt.expectedValid {
@@ -327,7 +344,7 @@ func TestAdvancedAnalysisRule_ValidateAnalysisType(t *testing.T) {
 		"max_threshold_value": 1000,
 		"min_threshold_value": 1,
 	}
-	rule := NewAdvancedAnalysisRule(testConfig)
+	rule := NewAdvancedAnalysisRule(testConfig, getTestTimeWindowsConfigForAdvanced())
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -395,7 +412,7 @@ func TestAdvancedAnalysisRule_ValidateKillChainPhase(t *testing.T) {
 		"max_threshold_value": 1000,
 		"min_threshold_value": 1,
 	}
-	rule := NewAdvancedAnalysisRule(testConfig)
+	rule := NewAdvancedAnalysisRule(testConfig, getTestTimeWindowsConfigForAdvanced())
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -507,7 +524,7 @@ func TestAdvancedAnalysisRule_ValidateStatisticalAnalysis(t *testing.T) {
 		"max_threshold_value": 1000,
 		"min_threshold_value": 1,
 	}
-	rule := NewAdvancedAnalysisRule(testConfig)
+	rule := NewAdvancedAnalysisRule(testConfig, getTestTimeWindowsConfigForAdvanced())
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -560,7 +577,7 @@ func TestAdvancedAnalysisRule_ConfigDefaults(t *testing.T) {
 		"max_threshold_value": 1000,
 		"min_threshold_value": 1,
 	}
-	rule := NewAdvancedAnalysisRule(testConfig)
+	rule := NewAdvancedAnalysisRule(testConfig, getTestTimeWindowsConfigForAdvanced())
 	
 	// Test default analysis types
 	types := rule.getAllowedAnalysisTypes()
@@ -612,11 +629,10 @@ func TestAdvancedAnalysisRule_CustomConfig(t *testing.T) {
 			"custom_type_2",
 		},
 		"max_threshold_value": 500,
-		"min_threshold_value": 5,
 		"max_group_by_fields": 10,
 	}
 	
-	rule := NewAdvancedAnalysisRule(customConfig)
+	rule := NewAdvancedAnalysisRule(customConfig, getTestTimeWindowsConfigForAdvanced())
 	
 	// Test custom analysis types
 	types := rule.getAllowedAnalysisTypes()
@@ -631,8 +647,8 @@ func TestAdvancedAnalysisRule_CustomConfig(t *testing.T) {
 	}
 	
 	minThreshold := rule.getMinThresholdValue()
-	if minThreshold != 5 {
-		t.Errorf("Expected min threshold 5, got %d", minThreshold)
+	if minThreshold != 1 {
+		t.Errorf("Expected min threshold 1 (hardcoded), got %d", minThreshold)
 	}
 	
 	maxGroupBy := rule.getMaxGroupByFields()

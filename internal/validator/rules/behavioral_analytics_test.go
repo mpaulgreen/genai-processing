@@ -7,6 +7,18 @@ import (
 	"genai-processing/pkg/types"
 )
 
+// getTestTimeWindowsConfig returns a test time windows configuration
+func getTestTimeWindowsConfig() map[string]interface{} {
+	return map[string]interface{}{
+		"allowed_baseline_windows": []interface{}{
+			"7_days", "14_days", "30_days", "60_days", "90_days",
+		},
+		"allowed_correlation_windows": []interface{}{
+			"1_minute", "5_minutes", "15_minutes", "30_minutes", "1_hour", "4_hours", "24_hours",
+		},
+	}
+}
+
 func TestBehavioralAnalyticsRule_Validate(t *testing.T) {
 	tests := []struct {
 		name             string
@@ -19,9 +31,10 @@ func TestBehavioralAnalyticsRule_Validate(t *testing.T) {
 		{
 			name: "Valid behavioral analytics configuration",
 			config: map[string]interface{}{
-				"allowed_baseline_windows": []interface{}{
-					"7_days", "14_days", "30_days", "60_days", "90_days",
+				"allowed_risk_factors": []interface{}{
+					"privilege_level", "resource_sensitivity", "timing_anomaly", "access_pattern",
 				},
+				"max_risk_factors": 10,
 			},
 			query: &types.StructuredQuery{
 				LogSource: "kube-apiserver",
@@ -345,7 +358,7 @@ func TestBehavioralAnalyticsRule_Validate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rule := NewBehavioralAnalyticsRule(tt.config)
+			rule := NewBehavioralAnalyticsRule(tt.config, getTestTimeWindowsConfig())
 			result := rule.Validate(tt.query)
 
 			if result.IsValid != tt.expectedValid {
@@ -434,7 +447,7 @@ func TestBehavioralAnalyticsRule_ValidateWeightingScheme(t *testing.T) {
 		},
 	}
 
-	rule := NewBehavioralAnalyticsRule(nil)
+	rule := NewBehavioralAnalyticsRule(nil, getTestTimeWindowsConfig())
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -455,7 +468,7 @@ func TestBehavioralAnalyticsRule_ValidateWeightingScheme(t *testing.T) {
 }
 
 func TestBehavioralAnalyticsRule_CalculatePerformanceImpact(t *testing.T) {
-	rule := NewBehavioralAnalyticsRule(nil)
+	rule := NewBehavioralAnalyticsRule(nil, getTestTimeWindowsConfig())
 
 	tests := []struct {
 		name           string
@@ -505,7 +518,7 @@ func TestBehavioralAnalyticsRule_CalculatePerformanceImpact(t *testing.T) {
 }
 
 func TestBehavioralAnalyticsRule_ConfigDefaults(t *testing.T) {
-	rule := NewBehavioralAnalyticsRule(nil)
+	rule := NewBehavioralAnalyticsRule(nil, nil)
 
 	// Test default risk factors
 	factors := rule.getAllowedRiskFactors()
@@ -559,7 +572,7 @@ func TestBehavioralAnalyticsRule_ConfigDefaults(t *testing.T) {
 }
 
 func TestBehavioralAnalyticsRule_AlgorithmSpecificValidation(t *testing.T) {
-	rule := NewBehavioralAnalyticsRule(nil)
+	rule := NewBehavioralAnalyticsRule(nil, getTestTimeWindowsConfig())
 
 	tests := []struct {
 		name             string
@@ -645,7 +658,7 @@ func TestBehavioralAnalyticsRule_CustomConfig(t *testing.T) {
 		"max_performance_score": 150,
 	}
 
-	rule := NewBehavioralAnalyticsRule(customConfig)
+	rule := NewBehavioralAnalyticsRule(customConfig, getTestTimeWindowsConfig())
 
 	// Test custom risk factors
 	factors := rule.getAllowedRiskFactors()

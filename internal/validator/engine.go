@@ -598,17 +598,14 @@ func (e *RuleEngine) initializePriorities() {
 	if e.config.RuleEngine.RulePriorities != nil {
 		e.priorities = e.config.RuleEngine.RulePriorities
 	} else {
-		// Default priorities
+		// Default priorities (updated to reflect consolidated input validation)
 		e.priorities = map[string]int{
-			"schema_validation":      100,
-			"required_fields":        90,
-			"sanitization":          80,
-			"patterns":              70,
-			"field_values":          60,
-			"advanced_analysis":     50,
-			"multi_source":          40,
-			"behavioral_analytics":  30,
-			"compliance":            20,
+			"schema_validation":                 100,
+			"comprehensive_input_validation":    90,  // Replaces required_fields, sanitization, patterns, field_values
+			"advanced_analysis":                 50,
+			"multi_source":                      40,
+			"behavioral_analytics":              30,
+			"compliance":                        20,
 		}
 	}
 }
@@ -616,11 +613,14 @@ func (e *RuleEngine) initializePriorities() {
 // initializeRules creates and registers default validation rules
 func (e *RuleEngine) initializeRules() {
 	// Register advanced rules
-	e.RegisterRule("advanced_analysis", rules.NewAdvancedAnalysisRule(e.config.GetConfigSection("analysis_limits")))
+	e.RegisterRule("advanced_analysis", rules.NewAdvancedAnalysisRule(
+		e.config.GetConfigSection("advanced_analysis"),
+		e.config.GetConfigSection("time_windows")))
 	e.RegisterRule("multi_source", rules.NewMultiSourceRule(e.config.GetConfigSection("multi_source")))
-	e.RegisterRule("behavioral_analytics", rules.NewBehavioralAnalyticsRule(e.config.GetConfigSection("behavioral_analytics")))
-	e.RegisterRule("compliance", rules.NewComplianceRule(e.config.GetConfigSection("compliance_framework")))
-	e.RegisterRule("field_values", rules.NewFieldValuesRule(nil))
+	e.RegisterRule("behavioral_analytics", rules.NewBehavioralAnalyticsRule(
+		e.config.GetConfigSection("behavioral_analytics"), 
+		e.config.GetConfigSection("time_windows")))
+	e.RegisterRule("compliance", rules.NewComplianceRule(e.config.GetConfigSection("compliance")))
 
 	// Set up default rule conditions
 	e.setDefaultConditions()

@@ -11,15 +11,17 @@ import (
 
 // BehavioralAnalyticsRule implements validation for behavioral analytics configuration
 type BehavioralAnalyticsRule struct {
-	config  map[string]interface{}
-	enabled bool
+	config          map[string]interface{}
+	timeWindowsConfig map[string]interface{}
+	enabled         bool
 }
 
 // NewBehavioralAnalyticsRule creates a new behavioral analytics validation rule
-func NewBehavioralAnalyticsRule(config map[string]interface{}) *BehavioralAnalyticsRule {
+func NewBehavioralAnalyticsRule(config map[string]interface{}, timeWindowsConfig map[string]interface{}) *BehavioralAnalyticsRule {
 	return &BehavioralAnalyticsRule{
-		config:  config,
-		enabled: true,
+		config:          config,
+		timeWindowsConfig: timeWindowsConfig,
+		enabled:         true,
 	}
 }
 
@@ -386,18 +388,17 @@ func (r *BehavioralAnalyticsRule) calculatePerformanceImpact(config *types.Behav
 
 // Configuration retrieval methods
 func (r *BehavioralAnalyticsRule) getAllowedBaselineWindows() []string {
-	if r.config == nil {
-		return r.getDefaultBaselineWindows()
-	}
-
-	if allowedWindows, ok := r.config["allowed_baseline_windows"].([]interface{}); ok {
-		windows := make([]string, len(allowedWindows))
-		for i, w := range allowedWindows {
-			if str, ok := w.(string); ok {
-				windows[i] = str
+	// Use time_windows.allowed_baseline_windows as single source of truth
+	if r.timeWindowsConfig != nil {
+		if allowedWindows, ok := r.timeWindowsConfig["allowed_baseline_windows"].([]interface{}); ok {
+			windows := make([]string, len(allowedWindows))
+			for i, w := range allowedWindows {
+				if str, ok := w.(string); ok {
+					windows[i] = str
+				}
 			}
+			return windows
 		}
-		return windows
 	}
 
 	return r.getDefaultBaselineWindows()

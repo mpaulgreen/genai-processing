@@ -1,11 +1,5 @@
 # Enhanced Validation Rules Configuration (Unit 3)
 # This file defines comprehensive validation rules for OpenShift audit query safety and advanced analysis
-# Includes schema validation, rule engine configuration, and advanced security monitoring rules
-
-# Schema Validation Configuration
-schema_validation:
-  enabled: true
-  strict_mode: true
 
 # Rule Engine Configuration
 rule_engine:
@@ -17,6 +11,7 @@ rule_engine:
 # Advanced Analysis Rules
 advanced_analysis:
   enabled: true
+  max_threshold_value: 10
   allowed_analysis_types:
     # Core analysis types
     - "multi_namespace_access"
@@ -250,38 +245,6 @@ sort_configuration:
     - "asc"
     - "desc"
 
-# Business Hours Configuration (Single Source of Truth)
-business_hours_configuration:
-  allowed_presets:
-    - "business_hours"
-    - "outside_business_hours"
-    - "weekend"
-    - "all_hours"
-
-# Response Status Configuration (Single Source of Truth)
-response_status_configuration:
-  allowed_status_codes:
-    - "200"
-    - "201"
-    - "204"
-    - "400"
-    - "401"
-    - "403"
-    - "404"
-    - "409"
-    - "422"
-    - "500"
-    - "502"
-    - "503"
-    - "504"
-
-# Auth Decisions Configuration (Single Source of Truth)
-auth_decisions_configuration:
-  allowed_decisions:
-    - "allow"
-    - "error"
-    - "forbid"
-
 # Compliance Rules
 compliance:
   enabled: true
@@ -302,106 +265,115 @@ multi_source:
   max_sources: 5
   max_correlation_fields: 10
   max_correlation_complexity: 100
-
-# Performance Rules
-performance:
+  
+# Consolidated Input Validation (replaces scattered safety_rules and sanitization sections)
+input_validation:
   enabled: true
-  max_query_complexity_score: 100
-  max_memory_usage_mb: 1024
-  max_cpu_usage_percent: 50
-  max_execution_time_seconds: 60
-  max_raw_results: 1000
-  max_aggregated_results: 500
-  max_concurrent_sources: 3
-
-# Legacy Safety Rules (streamlined for compatibility)
-safety_rules:
-  # Core log sources for audit queries
-  allowed_log_sources:
-    - "kube-apiserver"
-    - "openshift-apiserver"
-    - "oauth-server"
-    - "oauth-apiserver"
-    - "node-auditd"
   
-  # Standard HTTP verbs for audit queries
-  allowed_verbs:
-    - "get"
-    - "list"
-    - "create"
-    - "update"
-    - "patch"
-    - "delete"
-    - "watch"
-    - "impersonate"
-  
-  # Core Kubernetes/OpenShift resources (commonly audited)
-  allowed_resources:
-    - "pods"
-    - "services"
-    - "deployments"
-    - "configmaps"
-    - "secrets"
-    - "namespaces"
-    - "serviceaccounts"
-    - "roles"
-    - "rolebindings"
-    - "clusterroles"
-    - "clusterrolebindings"
-    - "customresourcedefinitions"
-    - "persistentvolumeclaims"
-    - "networkpolicies"
-    - "events"
-    - "nodes"
-    - "routes"
-    - "builds"
-    - "imagestreams"
-    - "projects"
-    - "users"
-    - "groups"
-    - "oauthclients"
-    - "securitycontextconstraints"
-  
-  # Essential forbidden patterns (security-critical only)
-  forbidden_patterns:
-    - "system:admin"
-    - "system:masters"
-    - "cluster-admin"
-    - "delete --all"
-    - "delete --force"
-    - "privileged: true"
-    - "hostNetwork: true"
-    - "runAsUser: 0"
-    - "oc adm policy add-cluster-role-to-user cluster-admin"
-    - "oc delete project --all"
-    - "service-account-token"
-    - "bearer token"
-  
-  
-  # Required fields for validation
+  # Required Fields Validation (consolidated from safety_rules.required_fields)
   required_fields:
-    - "log_source"
-
-# Essential input sanitization
-sanitization:
-  max_query_length: 10000
-  max_pattern_length: 500
-  valid_regex_pattern: "^[a-zA-Z0-9\\-_\\*\\.\\?\\+\\[\\]\\{\\}\\(\\)\\|\\\\/\\s]+$"
-  valid_ip_pattern: "^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$"
-  forbidden_chars: ["<", ">", "&", "\"", "'", "`", "|", ";", "$"]
-  # Essential limits (consolidated from PerformanceRule and timeframe_limits - based on analysis of 180 test queries)
-  max_result_limit: 50         # vs previous over-engineered max_limit: 1000, default_limit: 20, min_limit: 1
-  max_array_elements: 15       # vs previous over-engineered 100
-  max_days_back: 90           # moved from timeframe_limits - essential security boundary
-  allowed_timeframes:         # moved from timeframe_limits - complete input validation whitelist
-    - "today"
-    - "yesterday" 
-    - "1_hour_ago"
-    - "6_hours_ago"
-    - "12_hours_ago"
-    - "1_day_ago"
-    - "3_days_ago"
-    - "7_days_ago"
-    - "30_days_ago"
-    - "90_days_ago"
+    mandatory: ["log_source"]
+    conditional: []
+  
+  # Character & Format Validation (consolidated from sanitization character/format rules)
+  character_validation:
+    max_query_length: 10000
+    max_pattern_length: 500
+    forbidden_chars: ["<", ">", "&", "\"", "'", "`", "|", ";", "$"]
+    valid_regex_pattern: "^[a-zA-Z0-9\\-_\\*\\.\\?\\+\\[\\]\\{\\}\\(\\)\\|\\\\/\\s]+$"
+    valid_ip_pattern: "^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$"
+  
+  # Security Pattern Validation (consolidated from safety_rules.forbidden_patterns)
+  security_patterns:
+    forbidden_patterns:
+      - "system:admin"
+      - "system:masters"
+      - "cluster-admin"
+      - "delete --all"
+      - "delete --force"
+      - "privileged: true"
+      - "hostNetwork: true"
+      - "runAsUser: 0"
+      - "oc adm policy add-cluster-role-to-user cluster-admin"
+      - "oc delete project --all"
+      - "service-account-token"
+      - "bearer token"
+  
+  # Field Value Validation (consolidated from safety_rules allowed lists)
+  field_values:
+    allowed_log_sources:
+      - "kube-apiserver"
+      - "openshift-apiserver"
+      - "oauth-server"
+      - "oauth-apiserver"
+      - "node-auditd"
+    allowed_verbs:
+      - "get"
+      - "list"
+      - "create"
+      - "update"
+      - "patch"
+      - "delete"
+      - "watch"
+      - "impersonate"
+    allowed_resources:
+      - "pods"
+      - "services"
+      - "deployments"
+      - "configmaps"
+      - "secrets"
+      - "namespaces"
+      - "serviceaccounts"
+      - "roles"
+      - "rolebindings"
+      - "clusterroles"
+      - "clusterrolebindings"
+      - "customresourcedefinitions"
+      - "persistentvolumeclaims"
+      - "networkpolicies"
+      - "events"
+      - "nodes"
+      - "routes"
+      - "builds"
+      - "imagestreams"
+      - "projects"
+      - "users"
+      - "groups"
+      - "oauthclients"
+      - "securitycontextconstraints"
+    allowed_auth_decisions:
+      - "allow"
+      - "error"
+      - "forbid"
+    allowed_response_status:
+      - "200"
+      - "201"
+      - "204"
+      - "400"
+      - "401"
+      - "403"
+      - "404"
+      - "409"
+      - "422"
+      - "500"
+      - "502"
+      - "503"
+      - "504"
+  
+  # Performance Limits (consolidated from sanitization performance rules)
+  performance_limits:
+    max_result_limit: 50
+    max_array_elements: 15
+    max_days_back: 90
+    allowed_timeframes:
+      - "today"
+      - "yesterday" 
+      - "1_hour_ago"
+      - "6_hours_ago"
+      - "12_hours_ago"
+      - "1_day_ago"
+      - "3_days_ago"
+      - "7_days_ago"
+      - "30_days_ago"
+      - "90_days_ago"
 

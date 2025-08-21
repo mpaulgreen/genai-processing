@@ -11,15 +11,17 @@ import (
 
 // AdvancedAnalysisRule implements validation for advanced analysis configuration
 type AdvancedAnalysisRule struct {
-	config  map[string]interface{}
-	enabled bool
+	config            map[string]interface{}
+	timeWindowsConfig map[string]interface{}
+	enabled           bool
 }
 
 // NewAdvancedAnalysisRule creates a new advanced analysis validation rule
-func NewAdvancedAnalysisRule(config map[string]interface{}) *AdvancedAnalysisRule {
+func NewAdvancedAnalysisRule(config map[string]interface{}, timeWindowsConfig map[string]interface{}) *AdvancedAnalysisRule {
 	return &AdvancedAnalysisRule{
-		config:  config,
-		enabled: true,
+		config:            config,
+		timeWindowsConfig: timeWindowsConfig,
+		enabled:           true,
 	}
 }
 
@@ -166,7 +168,7 @@ func (r *AdvancedAnalysisRule) validateStatisticalAnalysis(analysis *types.Advan
 
 	stats := analysis.StatisticalAnalysis
 
-	// Validate pattern deviation threshold
+	// Validate pattern deviation threshold (hardcoded data science constants)
 	if stats.PatternDeviationThreshold != 0 {
 		if stats.PatternDeviationThreshold < 0.1 || stats.PatternDeviationThreshold > 10.0 {
 			result.IsValid = false
@@ -176,7 +178,7 @@ func (r *AdvancedAnalysisRule) validateStatisticalAnalysis(analysis *types.Advan
 		}
 	}
 
-	// Validate confidence interval
+	// Validate confidence interval (hardcoded data science constants)
 	if stats.ConfidenceInterval != 0 {
 		if stats.ConfidenceInterval < 0.5 || stats.ConfidenceInterval > 0.99 {
 			result.IsValid = false
@@ -186,7 +188,7 @@ func (r *AdvancedAnalysisRule) validateStatisticalAnalysis(analysis *types.Advan
 		}
 	}
 
-	// Validate sample size minimum
+	// Validate sample size minimum (hardcoded data science constants)
 	if stats.SampleSizeMinimum != 0 {
 		if stats.SampleSizeMinimum < 10 {
 			result.IsValid = false
@@ -312,16 +314,12 @@ func (r *AdvancedAnalysisRule) getMaxThresholdValue() int {
 			return maxVal
 		}
 	}
-	return 10000 // Default
+	return 10 // Default fallback - should be configured in rules.yaml
 }
 
 func (r *AdvancedAnalysisRule) getMinThresholdValue() int {
-	if r.config != nil {
-		if minVal, ok := r.config["min_threshold_value"].(int); ok {
-			return minVal
-		}
-	}
-	return 1 // Default
+	// Min threshold is hardcoded as a business rule - always 1
+	return 1
 }
 
 func (r *AdvancedAnalysisRule) getMaxGroupByFields() int {
@@ -334,18 +332,17 @@ func (r *AdvancedAnalysisRule) getMaxGroupByFields() int {
 }
 
 func (r *AdvancedAnalysisRule) getAllowedTimeWindows() []string {
-	if r.config == nil {
-		return r.getDefaultTimeWindows()
-	}
-
-	if allowedWindows, ok := r.config["allowed_time_windows"].([]interface{}); ok {
-		windows := make([]string, len(allowedWindows))
-		for i, w := range allowedWindows {
-			if str, ok := w.(string); ok {
-				windows[i] = str
+	// Use time_windows.allowed_time_windows as single source of truth
+	if r.timeWindowsConfig != nil {
+		if allowedWindows, ok := r.timeWindowsConfig["allowed_time_windows"].([]interface{}); ok {
+			windows := make([]string, len(allowedWindows))
+			for i, w := range allowedWindows {
+				if str, ok := w.(string); ok {
+					windows[i] = str
+				}
 			}
+			return windows
 		}
-		return windows
 	}
 
 	return r.getDefaultTimeWindows()
